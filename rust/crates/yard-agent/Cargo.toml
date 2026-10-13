@@ -1,0 +1,25 @@
+[package]
+name = "yard-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The chat agent: model providers, the tool loop and the tools that edit a
+# design. No HTTP server and no file access of its own; the web server wires
+# it to its open designs through the `World` trait.
+[dependencies]
+yard-core = { path = "../yard-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+# The Claude API and OpenAI-compatible endpoints are spoken as plain HTTP:
+# there is no official Rust SDK for either.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+# A small local server stands in for the model endpoints in tests.
+axum = "0.8"

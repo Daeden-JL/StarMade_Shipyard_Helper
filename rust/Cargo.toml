@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+# yard-ui targets wasm32 and is built by trunk. Keeping it out of the default
+# members lets `cargo build` / `cargo test` at this root work on the host target.
+default-members = ["crates/yard-core", "crates/yard-import", "crates/yard-agent", "crates/yard-server"]
+members = ["crates/yard-core", "crates/yard-import", "crates/yard-agent", "crates/yard-server", "crates/yard-ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

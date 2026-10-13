@@ -1,0 +1,33 @@
+# Gradle & Java build outputs
+.gradle/
+build/
+
+# External local dependencies (StarMade.jar is not redistributable)
+/libs/
+
+# Generated from a local StarMade install; not redistributable
+/catalog/
+
+# IDE settings
+.idea/
+*.iml
+out/
+.vscode/
+.classpath
+.project
+.settings/
+
+# CLI harness output
+/renders/
+
+# System files
+.DS_Store
+
+# JVM crash logs
+hs_err_pid*
+replay_pid*
+
+# Rust web shipyard
+/rust/target/
+/rust/web/dist/
+/rust/data/

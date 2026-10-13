@@ -1,0 +1,29 @@
+[package]
+name = "yard-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+yard-core = { path = "../yard-core" }
+yard-import = { path = "../yard-import" }
+yard-agent = { path = "../yard-agent" }
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "compression-gzip"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Block textures are PNG; only that decoder is needed.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# The game's model files (Ogre XML).
+roxmltree = "0.20"
+rand = "0.8"
+# Blueprint fingerprints for the exchange with a game server.
+sha2 = "0.10"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

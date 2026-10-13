@@ -1,0 +1,18 @@
+[package]
+name = "yard-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Reads 3D model files and turns them into blocks. Stands alone: it knows
+# nothing of the game's own files, so it depends on no other crate here.
+[dependencies]
+thiserror.workspace = true
+serde_json.workspace = true
+# Pure-Rust zlib, as yard-core uses, for FBX arrays.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+base64 = "0.22"
+# Textures: only the two kinds model files really carry.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

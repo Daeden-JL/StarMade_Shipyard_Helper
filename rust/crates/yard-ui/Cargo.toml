@@ -1,0 +1,28 @@
+[package]
+name = "yard-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The WASM client. Built by trunk, not by `cargo build` at the workspace root:
+# it targets wasm32 and pulls a different dependency set.
+[dependencies]
+yard-core = { path = "../yard-core" }
+leptos = { version = "0.7", features = ["csr"] }
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+gloo-net = { version = "0.6", features = ["http"] }
+console_error_panic_hook = "0.1"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlInputElement",
+  "File", "FileList", "Blob", "Event", "EventTarget", "MouseEvent", "UiEvent", "WheelEvent", "KeyboardEvent", "DomRect",
+  "Location", "History", "ResizeObserver", "Storage",
+  "WebGl2RenderingContext", "WebGlProgram", "WebGlShader", "WebGlBuffer",
+  "WebGlUniformLocation", "WebGlVertexArrayObject", "WebGlTexture", "HtmlImageElement",
+]

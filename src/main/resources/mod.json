@@ -1,0 +1,15 @@
+{
+  "name": "StarMade_Shipyard_Helper",
+  "author": "Daeden",
+  "description": "Talk to a local AI agent to design ships and turrets inside a shipyard design.",
+  "version": "0.1.0",
+  "starmade_version": "0.304.7",
+  "client_mod": false,
+  "server_mod": true,
+  "smd_resource_id": 99044,
+  "main_class": "com.starmade.yardhelper.mod.ShipyardHelperMod",
+  "starloader_version": "1.0",
+  "core_mod": false,
+  "requires_class_resize": false,
+  "dependencies": []
+}

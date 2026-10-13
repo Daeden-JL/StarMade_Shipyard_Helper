@@ -1,0 +1,1708 @@
+{
+ "note": "Values printed by game-verify (the game's own readers, 0.304.7). old_segments.py reproduces every one of them without game code. Hashes cover blocks with type != 0, including blocks whose type the block config does not know (exit 1 marks those blueprints). Stock paths are relative to the game install ($STARMADE_DIR).",
+ "hash": {
+  "rawHash": "SHA-256 over blocks sorted by x,y,z: i32 x,y,z big-endian + 3 stored bytes (value little-endian)",
+  "contentHash": "SHA-256 over blocks sorted by x,y,z: i32 x,y,z + u16 type + u8 orientation + u8 active + u8 hp, big-endian",
+  "linksHash": "SHA-256 over (controller, type, target) sorted: i32 x,y,z + u16 type + i32 x,y,z, big-endian"
+ },
+ "stock": [
+  {
+   "blueprint": "blueprints-stations/trading-guild/Tradestation Gamma",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/trading-guild/Tradestation Gamma\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Tradestation Gamma",
+     "totalBlocks": 47740,
+     "rawHash": "a5a378a49956edced90711e85c46f9a10ae02099670d6ba9aa4fbf27b8a00c44",
+     "contentHash": "819438b4c81a4c5aae5f90327cd1d71b3a849fea95c8421750478aa5ab361490",
+     "linkControllers": 1,
+     "linkGroups": 1,
+     "linkTargets": 10,
+     "linksHash": "98bea85af219f093471bfb5172d24138f9c9c52855f9b72ffa0106298759d134",
+     "segmentVersions": {
+      "2": 11
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-stations/trading-guild/Tradestation Beta",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/trading-guild/Tradestation Beta\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Tradestation Beta",
+     "totalBlocks": 308980,
+     "rawHash": "6081d97db90412b871b1f22818a0072516c072d87f578db6c4fcf9050cf7df88",
+     "contentHash": "6987917d04b936736478f1db8a16289e6614441828870056437327641ccb99ae",
+     "linkControllers": 25,
+     "linkGroups": 72,
+     "linkTargets": 616,
+     "linksHash": "c3a07cb3a2e9415609d106c2d1b4f8cf24402df3a6d10fe1d7b59aca08ca582a",
+     "segmentVersions": {
+      "2": 154
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-npc/trading-guild/stations/Tradestation Eta",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-npc/trading-guild/stations/Tradestation Eta\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Tradestation Eta",
+     "totalBlocks": 189385,
+     "rawHash": "36273916c345b530d8e89c2bb49387bfb5ed78d935c4a2634acba68256f93221",
+     "contentHash": "f08c36bba0729a1d1c55bebcd5658eccfd8ddf9cf84f7ace249399cf76fd2934",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 69
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_0",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_1",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_2",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_3",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_4",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_5",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Tradestation Eta/ATTACHED_6",
+     "totalBlocks": 519,
+     "rawHash": "9686872700ec9cbad441b07ca2f88abbbe9fd5e8142feb5e9da19a206a8b165f",
+     "contentHash": "c474698060ca523e8152c6ed64b015b162336eb89164b82be85ded3fcba6e96f",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 129,
+     "linksHash": "7024645c38395f78ad7b4bd16492a67cc53cdfa247d5139d187a6c485e837b6b",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-npc/pirate/stations/Piratestation Beta",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-npc/pirate/stations/Piratestation Beta\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Piratestation Beta",
+     "totalBlocks": 333521,
+     "rawHash": "78ab493f42a6623255a2f5712af1bf5dc58061ffe72986934f6502fa6f86b471",
+     "contentHash": "763bd206a826c79fcec6275abf56f5c279ada0a2b2fd4fa1c61880ea0f047a53",
+     "linkControllers": 3,
+     "linkGroups": 3,
+     "linkTargets": 84,
+     "linksHash": "b7be67868b0e88605a34f4c50f07d4c3df248aba69fc1ba16117e2f4b13a2f2c",
+     "segmentVersions": {
+      "2": 223
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_0",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_1",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_2",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_3",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_4",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_5",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_6",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_7",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_8",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_9",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_10",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_11",
+     "totalBlocks": 126,
+     "rawHash": "b9ec67d8603091240931313e00454811ae41195afe6e6ee6594633f05b37efd9",
+     "contentHash": "3fbe042c3e307f9a9e58bc96751f66d5027d4d5c467b5e1b4a724c0912bf7b10",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_12",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Beta/ATTACHED_13",
+     "totalBlocks": 125,
+     "rawHash": "cc02818b61052a842796962d3e93f0cbbd7c960f591410948f74506526d09d1d",
+     "contentHash": "dcb4a75d7df29cd31e7c20b7cf62ba8f721d1f703a4fe09b1b519684a45ba04f",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 30,
+     "linksHash": "a0366b7955c982c8e904482a221ac5942f2407e9210246d49f5f5ec691adf50c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-stations/pirate/Piratestation Alpha",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/pirate/Piratestation Alpha\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Piratestation Alpha",
+     "totalBlocks": 280576,
+     "rawHash": "c01a8a91f31d83b0a7f9f919e65db1fcb596d11af7917da9328f55d298415ce8",
+     "contentHash": "675788b3b71edabff79ce7adeb8f38afe9a26a841c181c5d3815ba0d12efccdd",
+     "linkControllers": 23,
+     "linkGroups": 32,
+     "linkTargets": 1428,
+     "linksHash": "c182f449507095198fd2f6fa370562502425f266cab7b5c9529cabdedf459cff",
+     "segmentVersions": {
+      "2": 90
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_0",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_1",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_2",
+     "totalBlocks": 359,
+     "rawHash": "a46039d8d0b997d95bb374b0a38bcbbcb0073b45ca8119e807328053fc7c7bb4",
+     "contentHash": "fbba9119aaa618016a6072ee87a95294760baaef8b71b5d3991ab19a050d078d",
+     "linkControllers": 2,
+     "linkGroups": 3,
+     "linkTargets": 26,
+     "linksHash": "b998749efd80d47832d7465f07dcc93c95b1cc641fec45c9890e69c3bf6eb951",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_3",
+     "totalBlocks": 19,
+     "rawHash": "a2839446eb1469afe6af85a7f83ed33f06e1382825384f04e19e88d987b1387a",
+     "contentHash": "963e4d5e7a257d3fc8ef6916f03876d53fccebb23cb6a1a4ff0b7620ebdf783d",
+     "linkControllers": 2,
+     "linkGroups": 2,
+     "linkTargets": 3,
+     "linksHash": "aabbbd154bc2c44c5ca4987ae3f1caf071dd8dfe023eac6163cf1c7ef6f52cad",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_4",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_5",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_6",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_7",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_8",
+     "totalBlocks": 359,
+     "rawHash": "a46039d8d0b997d95bb374b0a38bcbbcb0073b45ca8119e807328053fc7c7bb4",
+     "contentHash": "fbba9119aaa618016a6072ee87a95294760baaef8b71b5d3991ab19a050d078d",
+     "linkControllers": 2,
+     "linkGroups": 3,
+     "linkTargets": 26,
+     "linksHash": "b998749efd80d47832d7465f07dcc93c95b1cc641fec45c9890e69c3bf6eb951",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_9",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_10",
+     "totalBlocks": 359,
+     "rawHash": "a46039d8d0b997d95bb374b0a38bcbbcb0073b45ca8119e807328053fc7c7bb4",
+     "contentHash": "fbba9119aaa618016a6072ee87a95294760baaef8b71b5d3991ab19a050d078d",
+     "linkControllers": 2,
+     "linkGroups": 3,
+     "linkTargets": 26,
+     "linksHash": "b998749efd80d47832d7465f07dcc93c95b1cc641fec45c9890e69c3bf6eb951",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_11",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_12",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Piratestation Alpha/ATTACHED_13",
+     "totalBlocks": 393,
+     "rawHash": "ce57eb1cffed0922f6c5b5940f6081b823724fb3c3b2b4db96136947294f184d",
+     "contentHash": "4ce9b30324b644432fa797bcf495abdc1f73046bcb4a2d36e11e45617e4787a1",
+     "linkControllers": 3,
+     "linkGroups": 6,
+     "linkTargets": 39,
+     "linksHash": "6e30c65f842adeb93e838904967494fe5c956b0b94695edc0c8daf4119dd04fb",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-stations/neutral/Derelict Alpha",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/neutral/Derelict Alpha\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Derelict Alpha",
+     "totalBlocks": 186253,
+     "rawHash": "1798d5519f069222cd1f3a5a89011fbeb9711912663ecc40be5bb4c6bbcf89e8",
+     "contentHash": "007023e312e52752bd7acd3545c21401618803cd331dbca97d6ffdd862df0ab7",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 76
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-stations/neutral/Derelict Delta",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/neutral/Derelict Delta\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Derelict Delta",
+     "totalBlocks": 659402,
+     "rawHash": "81a9d64fac57a93d3b54925ff7e199588b40bdc2580487d4c7a45a25c70b4a61",
+     "contentHash": "41ac8d72f2c5da69fb7c28ed84a3be3d332c9f12ea4b5748fd0bc040e8ee39aa",
+     "linkControllers": 748,
+     "linkGroups": 1041,
+     "linkTargets": 5947,
+     "linksHash": "6fe6e7cdd8557cb17dc1f8dd66b6dc39c90dad655d62dc1f74c8909de84bccfe",
+     "segmentVersions": {
+      "2": 224
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-stations/neutral/Derelict Eta",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/neutral/Derelict Eta\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Derelict Eta",
+     "totalBlocks": 1509059,
+     "rawHash": "4b1c355dbaf58736aefea5ffa9ae977d851e164d544faeab6e1fb03c7ecd367b",
+     "contentHash": "89f03dc88f230bf0ffa1930642c067d70781fd0241cea2ad411de9a2c5d051d8",
+     "linkControllers": 5,
+     "linkGroups": 5,
+     "linkTargets": 51,
+     "linksHash": "efe53b1eed86beb0fb29ce9ec04009e6522e4bf795f13c286944fc1f17d4cdff",
+     "segmentVersions": {
+      "2": 373
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Derelict Eta/ATTACHED_0",
+     "totalBlocks": 1851,
+     "rawHash": "86c3703a89893cd20eea2e60ebc99d2dfb644d1f89aabcd56bb56ed665cf944e",
+     "contentHash": "6498dc6a7389ea6b13c128896e56dfaca1ccb99426d523d08b49bab0704fdae2",
+     "linkControllers": 6,
+     "linkGroups": 9,
+     "linkTargets": 148,
+     "linksHash": "3674405ccc9051c524189cbbaa0264c0111807d53d36a2c500479cb992a21b9c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Derelict Eta/ATTACHED_1",
+     "totalBlocks": 1851,
+     "rawHash": "86c3703a89893cd20eea2e60ebc99d2dfb644d1f89aabcd56bb56ed665cf944e",
+     "contentHash": "6498dc6a7389ea6b13c128896e56dfaca1ccb99426d523d08b49bab0704fdae2",
+     "linkControllers": 6,
+     "linkGroups": 10,
+     "linkTargets": 148,
+     "linksHash": "3674405ccc9051c524189cbbaa0264c0111807d53d36a2c500479cb992a21b9c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Derelict Eta/ATTACHED_2",
+     "totalBlocks": 1851,
+     "rawHash": "86c3703a89893cd20eea2e60ebc99d2dfb644d1f89aabcd56bb56ed665cf944e",
+     "contentHash": "6498dc6a7389ea6b13c128896e56dfaca1ccb99426d523d08b49bab0704fdae2",
+     "linkControllers": 6,
+     "linkGroups": 10,
+     "linkTargets": 148,
+     "linksHash": "3674405ccc9051c524189cbbaa0264c0111807d53d36a2c500479cb992a21b9c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Derelict Eta/ATTACHED_3",
+     "totalBlocks": 1851,
+     "rawHash": "86c3703a89893cd20eea2e60ebc99d2dfb644d1f89aabcd56bb56ed665cf944e",
+     "contentHash": "6498dc6a7389ea6b13c128896e56dfaca1ccb99426d523d08b49bab0704fdae2",
+     "linkControllers": 6,
+     "linkGroups": 9,
+     "linkTargets": 148,
+     "linksHash": "3674405ccc9051c524189cbbaa0264c0111807d53d36a2c500479cb992a21b9c",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "old disk"
+    },
+    {
+     "path": "Derelict Eta/ATTACHED_4",
+     "totalBlocks": 18448,
+     "rawHash": "b0cc9139c6139108a58617ed5c587766b5c00c264b24660409e9cb20ea477f4c",
+     "contentHash": "c423bf370fe54be625bca2cb7fd7a2816d0d29bdbc5d6626032a0dd3c9fce21f",
+     "linkControllers": 3,
+     "linkGroups": 8,
+     "linkTargets": 1952,
+     "linksHash": "7b102aef2da5662ccce7050736db74f390b74debd808fa80f15b14c561fe60e8",
+     "segmentVersions": {
+      "2": 12
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "server-database/world0/npcFactions/Scavengers/blueprints/Kukri",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/server-database/world0/npcFactions/Scavengers/blueprints/Kukri\"",
+   "exit": 1,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Kukri",
+     "totalBlocks": 34155,
+     "rawHash": "7b2d2d10c4035d477439cac7480be7a313faaa4a2e54ea4bf428674eaf9bcca3",
+     "contentHash": "23622de343063738dfa5f57149cbd8c660dfc6be3264bddee962f47ff14409cb",
+     "linkControllers": 17,
+     "linkGroups": 33,
+     "linkTargets": 5640,
+     "linksHash": "bfb930b1d27d6f05e0e83f789f1ac04833a975324aa9bbdfddb6d0180022ed09",
+     "segmentVersions": {
+      "2": 10
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "server-database/world0/npcFactions/Trading Guild/blueprints/Refueling Platform",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/server-database/world0/npcFactions/Trading Guild/blueprints/Refueling Platform\"",
+   "exit": 0,
+   "segmentVersions": [
+    "2"
+   ],
+   "entities": [
+    {
+     "path": "Refueling Platform",
+     "totalBlocks": 229332,
+     "rawHash": "fff57ef0b0ee1164d4c122e7fdc3312b2cd44d4baa94d89c6c3db1f128f519bd",
+     "contentHash": "11cf0f4ea6d779604f643e072c867b3c02629c9e510cf4a74f7d5992d7238950",
+     "linkControllers": 68,
+     "linkGroups": 88,
+     "linkTargets": 3887,
+     "linksHash": "16f57c1f769b8e4c831dc8db9b6372765b5e595506e505c6cacd81ddd30d14c6",
+     "segmentVersions": {
+      "2": 96
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_0",
+     "totalBlocks": 433,
+     "rawHash": "01907909cc9e8e7935aacc0fa179e860ad8b5247d21d4e945e915f726e286d3b",
+     "contentHash": "0d85507f9983aa4e766a40b113dd0e7d3f9892c3676d8338c4fea86d7fccc517",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_0/ATTACHED_0",
+     "totalBlocks": 266,
+     "rawHash": "4c157e4aa49691ae87eefebd0ce90a60ea8e266e29d9e367507d66386d756b6d",
+     "contentHash": "df4e5ece04bdff7bfbed882f5ccdb0d1d6a1e6b62161dea0ee5c0831f18314af",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 150,
+     "linksHash": "ab9cbeaa23c1eda2cdd914a448de957bd8a965d0d591f084c69148853cd6c4d6",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_1",
+     "totalBlocks": 27,
+     "rawHash": "075cc10b79620005257d398931009ad6864d69ee9ea03571914eb2bdcdd4c937",
+     "contentHash": "2a67ce5a54e7bb7b3adb9ce68b39e7535b91a171f7938a2375f04f469acb7752",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_2",
+     "totalBlocks": 433,
+     "rawHash": "01907909cc9e8e7935aacc0fa179e860ad8b5247d21d4e945e915f726e286d3b",
+     "contentHash": "0d85507f9983aa4e766a40b113dd0e7d3f9892c3676d8338c4fea86d7fccc517",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_2/ATTACHED_0",
+     "totalBlocks": 266,
+     "rawHash": "4c157e4aa49691ae87eefebd0ce90a60ea8e266e29d9e367507d66386d756b6d",
+     "contentHash": "df4e5ece04bdff7bfbed882f5ccdb0d1d6a1e6b62161dea0ee5c0831f18314af",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 150,
+     "linksHash": "ab9cbeaa23c1eda2cdd914a448de957bd8a965d0d591f084c69148853cd6c4d6",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_3",
+     "totalBlocks": 43,
+     "rawHash": "30a807afe3a4833d9ac1932a9ff38c4ebc1a93fb0d1f6067655fa153e73fac30",
+     "contentHash": "d2a36e58df9753fc697d98bfa6671b30f7efe101b2d953a0be7519dfd54fe5fd",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_3/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "f9ef5b9435a712a878e642a838eed9670534ac592b4dea162bc741c464dfa260",
+     "contentHash": "0a2f796c3f3124dd82b904446e18218ec521816c3711fccfd6475ca7e72bdd94",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 12,
+     "linksHash": "9a091ff785f00646250c40a74a46f65812138903a635cb192084bf6fd87c3fdd",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_4",
+     "totalBlocks": 43,
+     "rawHash": "30a807afe3a4833d9ac1932a9ff38c4ebc1a93fb0d1f6067655fa153e73fac30",
+     "contentHash": "d2a36e58df9753fc697d98bfa6671b30f7efe101b2d953a0be7519dfd54fe5fd",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_4/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "f9ef5b9435a712a878e642a838eed9670534ac592b4dea162bc741c464dfa260",
+     "contentHash": "0a2f796c3f3124dd82b904446e18218ec521816c3711fccfd6475ca7e72bdd94",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 12,
+     "linksHash": "9a091ff785f00646250c40a74a46f65812138903a635cb192084bf6fd87c3fdd",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_5",
+     "totalBlocks": 43,
+     "rawHash": "30a807afe3a4833d9ac1932a9ff38c4ebc1a93fb0d1f6067655fa153e73fac30",
+     "contentHash": "d2a36e58df9753fc697d98bfa6671b30f7efe101b2d953a0be7519dfd54fe5fd",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_5/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "f9ef5b9435a712a878e642a838eed9670534ac592b4dea162bc741c464dfa260",
+     "contentHash": "0a2f796c3f3124dd82b904446e18218ec521816c3711fccfd6475ca7e72bdd94",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 12,
+     "linksHash": "9a091ff785f00646250c40a74a46f65812138903a635cb192084bf6fd87c3fdd",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_6",
+     "totalBlocks": 433,
+     "rawHash": "01907909cc9e8e7935aacc0fa179e860ad8b5247d21d4e945e915f726e286d3b",
+     "contentHash": "0d85507f9983aa4e766a40b113dd0e7d3f9892c3676d8338c4fea86d7fccc517",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_6/ATTACHED_0",
+     "totalBlocks": 266,
+     "rawHash": "4c157e4aa49691ae87eefebd0ce90a60ea8e266e29d9e367507d66386d756b6d",
+     "contentHash": "df4e5ece04bdff7bfbed882f5ccdb0d1d6a1e6b62161dea0ee5c0831f18314af",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 150,
+     "linksHash": "ab9cbeaa23c1eda2cdd914a448de957bd8a965d0d591f084c69148853cd6c4d6",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_7",
+     "totalBlocks": 433,
+     "rawHash": "01907909cc9e8e7935aacc0fa179e860ad8b5247d21d4e945e915f726e286d3b",
+     "contentHash": "0d85507f9983aa4e766a40b113dd0e7d3f9892c3676d8338c4fea86d7fccc517",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_7/ATTACHED_0",
+     "totalBlocks": 266,
+     "rawHash": "4c157e4aa49691ae87eefebd0ce90a60ea8e266e29d9e367507d66386d756b6d",
+     "contentHash": "df4e5ece04bdff7bfbed882f5ccdb0d1d6a1e6b62161dea0ee5c0831f18314af",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 150,
+     "linksHash": "ab9cbeaa23c1eda2cdd914a448de957bd8a965d0d591f084c69148853cd6c4d6",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_8",
+     "totalBlocks": 43,
+     "rawHash": "30a807afe3a4833d9ac1932a9ff38c4ebc1a93fb0d1f6067655fa153e73fac30",
+     "contentHash": "d2a36e58df9753fc697d98bfa6671b30f7efe101b2d953a0be7519dfd54fe5fd",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_8/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "f9ef5b9435a712a878e642a838eed9670534ac592b4dea162bc741c464dfa260",
+     "contentHash": "0a2f796c3f3124dd82b904446e18218ec521816c3711fccfd6475ca7e72bdd94",
+     "linkControllers": 3,
+     "linkGroups": 4,
+     "linkTargets": 12,
+     "linksHash": "9a091ff785f00646250c40a74a46f65812138903a635cb192084bf6fd87c3fdd",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_9",
+     "totalBlocks": 433,
+     "rawHash": "01907909cc9e8e7935aacc0fa179e860ad8b5247d21d4e945e915f726e286d3b",
+     "contentHash": "0d85507f9983aa4e766a40b113dd0e7d3f9892c3676d8338c4fea86d7fccc517",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_9/ATTACHED_0",
+     "totalBlocks": 266,
+     "rawHash": "4c157e4aa49691ae87eefebd0ce90a60ea8e266e29d9e367507d66386d756b6d",
+     "contentHash": "df4e5ece04bdff7bfbed882f5ccdb0d1d6a1e6b62161dea0ee5c0831f18314af",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 150,
+     "linksHash": "ab9cbeaa23c1eda2cdd914a448de957bd8a965d0d591f084c69148853cd6c4d6",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_10",
+     "totalBlocks": 433,
+     "rawHash": "01907909cc9e8e7935aacc0fa179e860ad8b5247d21d4e945e915f726e286d3b",
+     "contentHash": "0d85507f9983aa4e766a40b113dd0e7d3f9892c3676d8338c4fea86d7fccc517",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Refueling Platform/ATTACHED_10/ATTACHED_0",
+     "totalBlocks": 266,
+     "rawHash": "4c157e4aa49691ae87eefebd0ce90a60ea8e266e29d9e367507d66386d756b6d",
+     "contentHash": "df4e5ece04bdff7bfbed882f5ccdb0d1d6a1e6b62161dea0ee5c0831f18314af",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 150,
+     "linksHash": "ab9cbeaa23c1eda2cdd914a448de957bd8a965d0d591f084c69148853cd6c4d6",
+     "segmentVersions": {
+      "2": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "server-database/world0/npcFactions/Outcasts/blueprints/Scud",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/server-database/world0/npcFactions/Outcasts/blueprints/Scud\"",
+   "exit": 0,
+   "segmentVersions": [
+    "3"
+   ],
+   "entities": [
+    {
+     "path": "Scud",
+     "totalBlocks": 2031,
+     "rawHash": "c039eef2e838dfea76a57fd573dcd87b4183d4865ae55cbb0302fa5e17196b74",
+     "contentHash": "24a271f5556ee57d1fbb769a3be0c8b291b8ca922f9d420cf35236f2aac51703",
+     "linkControllers": 14,
+     "linkGroups": 23,
+     "linkTargets": 135,
+     "linksHash": "d66f69d7215a048c4974cd7d113c3ae09be66b673592eafffec9c6253675916e",
+     "segmentVersions": {
+      "3": 2
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Scud/ATTACHED_0",
+     "totalBlocks": 8,
+     "rawHash": "722554ad5e05bd79413676fd49277a9c5548018edf62ad9823e11f73028534ec",
+     "contentHash": "5b1553a264950bebf64090ea08d9b48edddb11892b61fa2b6bd6837f01765bd9",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "server-database/world0/npcFactions/Trading Guild/blueprints/Small Refueling Platform",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/server-database/world0/npcFactions/Trading Guild/blueprints/Small Refueling Platform\"",
+   "exit": 1,
+   "segmentVersions": [
+    "3"
+   ],
+   "entities": [
+    {
+     "path": "Small Refueling Platform",
+     "totalBlocks": 47862,
+     "rawHash": "cad6ec33d911a1718312297d98ede16ccde6dd4b49da14525e25473d3295dec8",
+     "contentHash": "c78c2228b8dd08374f16e7868f024283ecd7477bd38ee7f45ddaa7a4f709e690",
+     "linkControllers": 122,
+     "linkGroups": 160,
+     "linkTargets": 1261,
+     "linksHash": "ad5d4a75596e7f844ba333c6a0bea3e35786e097c28d062425da38a8e7da37dc",
+     "segmentVersions": {
+      "3": 12
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Small Refueling Platform/ATTACHED_0",
+     "totalBlocks": 2,
+     "rawHash": "785b9ca4aaf4b7c124bc366fa96b1d5e8c39d257b1ddc0707343751d0c40efb3",
+     "contentHash": "800718ee3028df9f4a3e2f08b1c72da2cfc8d6ec4c4d2255ea621643c781455a",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Small Refueling Platform/ATTACHED_1",
+     "totalBlocks": 20,
+     "rawHash": "408e41975858b54bba333ffe980b83066a35ab90b2cd9f3f5876eddcdad74f62",
+     "contentHash": "2f3300426603271eb85ddebbb30ae61dd77b5ae7b1d8d9ca20faccc52a96eb08",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "server-database/world0/npcFactions/Trading Guild/blueprints/Research Station",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/server-database/world0/npcFactions/Trading Guild/blueprints/Research Station\"",
+   "exit": 1,
+   "segmentVersions": [
+    "3"
+   ],
+   "entities": [
+    {
+     "path": "Research Station",
+     "totalBlocks": 75893,
+     "rawHash": "228c3b308d7a91b2169cabc6fb39f55bb1a885d42b6d7985a0d2c397fc0194f9",
+     "contentHash": "9f148524c43c0a9345c4b9ba837a8e14ecb45f7aea5d7710fb8b285c2daec69b",
+     "linkControllers": 142,
+     "linkGroups": 228,
+     "linkTargets": 3130,
+     "linksHash": "d4caa11b6fdf33693cbc3a238e47eb75ca51d76c3df4854597042edeb9055291",
+     "segmentVersions": {
+      "3": 50
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_0",
+     "totalBlocks": 2,
+     "rawHash": "bf07efa9b8c4c073bf2863b6559cee90f162f5d99c58ef4a889e9e5ce20a393e",
+     "contentHash": "dcc91b8772235c300b7220d7134e75e8e90ca07ed3d30a43ae638cff6a305d18",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_1",
+     "totalBlocks": 13,
+     "rawHash": "078d256c184e794451a8b6b6879f40696ff365baad10c4948ce7f34b366c95bc",
+     "contentHash": "38e12cd2f8403030aa573e2c4cfd9c854f06bb0df15c35efdd16d2570895000e",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_1/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "0a488f33be50ce586990866ea83f93ce462d0b85c2f6dd5d86ae4b1fd4a9064f",
+     "contentHash": "12c8cdfc4d2b4b2a01205fbf6fe9d9c5322a84ee88e071ed166cf06d3cc9d438",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 7,
+     "linksHash": "27d8805e6067ee1930a5924c394a9b2bcffb3f912b0433c8310da134a3f6c02c",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_2",
+     "totalBlocks": 13,
+     "rawHash": "078d256c184e794451a8b6b6879f40696ff365baad10c4948ce7f34b366c95bc",
+     "contentHash": "38e12cd2f8403030aa573e2c4cfd9c854f06bb0df15c35efdd16d2570895000e",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_2/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "0a488f33be50ce586990866ea83f93ce462d0b85c2f6dd5d86ae4b1fd4a9064f",
+     "contentHash": "12c8cdfc4d2b4b2a01205fbf6fe9d9c5322a84ee88e071ed166cf06d3cc9d438",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 7,
+     "linksHash": "27d8805e6067ee1930a5924c394a9b2bcffb3f912b0433c8310da134a3f6c02c",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_3",
+     "totalBlocks": 13,
+     "rawHash": "078d256c184e794451a8b6b6879f40696ff365baad10c4948ce7f34b366c95bc",
+     "contentHash": "38e12cd2f8403030aa573e2c4cfd9c854f06bb0df15c35efdd16d2570895000e",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_3/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "0a488f33be50ce586990866ea83f93ce462d0b85c2f6dd5d86ae4b1fd4a9064f",
+     "contentHash": "12c8cdfc4d2b4b2a01205fbf6fe9d9c5322a84ee88e071ed166cf06d3cc9d438",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 7,
+     "linksHash": "27d8805e6067ee1930a5924c394a9b2bcffb3f912b0433c8310da134a3f6c02c",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_4",
+     "totalBlocks": 13,
+     "rawHash": "078d256c184e794451a8b6b6879f40696ff365baad10c4948ce7f34b366c95bc",
+     "contentHash": "38e12cd2f8403030aa573e2c4cfd9c854f06bb0df15c35efdd16d2570895000e",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_4/ATTACHED_0",
+     "totalBlocks": 30,
+     "rawHash": "0a488f33be50ce586990866ea83f93ce462d0b85c2f6dd5d86ae4b1fd4a9064f",
+     "contentHash": "12c8cdfc4d2b4b2a01205fbf6fe9d9c5322a84ee88e071ed166cf06d3cc9d438",
+     "linkControllers": 3,
+     "linkGroups": 5,
+     "linkTargets": 7,
+     "linksHash": "27d8805e6067ee1930a5924c394a9b2bcffb3f912b0433c8310da134a3f6c02c",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_5",
+     "totalBlocks": 38,
+     "rawHash": "133d52a9cc50d07db041a0e4e5d11c82bc68ed6a75cd47e605b467a0e2dc971b",
+     "contentHash": "faf123710421ea01591a4ae29290c2121a857bc3a9509290be5637b0704d9946",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_6",
+     "totalBlocks": 19,
+     "rawHash": "ba22f420be4a2a7e38ee67060b96233fc331d0d3d54f00a83b18f22bd9f88cd3",
+     "contentHash": "86022f7c0e6cb780bad09b86479a6a6938c69b94b636fdc50107e861b6624ee3",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_7",
+     "totalBlocks": 19,
+     "rawHash": "67a5c66db2a6813995eaae695b553370012782d4c2b8006f9759c2aa8927ec98",
+     "contentHash": "db2a5c4ff7ffd838d92368f3597e4c2a63ff118802032f55ad87b1e1bb76ba8d",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_8",
+     "totalBlocks": 19,
+     "rawHash": "67a5c66db2a6813995eaae695b553370012782d4c2b8006f9759c2aa8927ec98",
+     "contentHash": "db2a5c4ff7ffd838d92368f3597e4c2a63ff118802032f55ad87b1e1bb76ba8d",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Research Station/ATTACHED_9",
+     "totalBlocks": 19,
+     "rawHash": "ba22f420be4a2a7e38ee67060b96233fc331d0d3d54f00a83b18f22bd9f88cd3",
+     "contentHash": "86022f7c0e6cb780bad09b86479a6a6938c69b94b636fdc50107e861b6624ee3",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints-stations/shop/Trade Outpost",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints-stations/shop/Trade Outpost\"",
+   "exit": 0,
+   "segmentVersions": [
+    "6"
+   ],
+   "entities": [
+    {
+     "path": "Trade Outpost",
+     "totalBlocks": 29887,
+     "rawHash": "da3672dceac113180fa15b48ebdcf5eed5388282b93c8e1e1239304aa1e50ade",
+     "contentHash": "8a0a8752033142e43a622fc44d6d996269ca2ee6098b582ad6b53d685fa6f402",
+     "linkControllers": 159,
+     "linkGroups": 242,
+     "linkTargets": 2360,
+     "linksHash": "ad2b1f5b4f73612616bf8fe6dca90636c9caa59b7dc2722f7a7629c684274aee",
+     "segmentVersions": {
+      "6": 19
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Trade Outpost/ATTACHED_0",
+     "totalBlocks": 105,
+     "rawHash": "c21e9acd49aa161e40274c863b6dabf793ed2740d081c607a3e977f4222db183",
+     "contentHash": "9fbaf548bc18f8b3caa1eae0a8f58c63af66343e6e66488a1f73bffa299c6f83",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "blueprint": "blueprints/Isanth Type-PNR-25-B",
+   "command": "rust/tools/game-verify/run.sh \"$STARMADE_DIR/blueprints/Isanth Type-PNR-25-B\"",
+   "exit": 0,
+   "segmentVersions": [
+    "6"
+   ],
+   "entities": [
+    {
+     "path": "Isanth Type-PNR-25-B",
+     "totalBlocks": 3167,
+     "rawHash": "bd7f3f1a3767d690cb059bf021035cba3a49e8197de53b6533811eec7178ab0c",
+     "contentHash": "9441cf5f444f44beb06fb3aad0695631b71cf6fffb38e81ac10f29c400987ce9",
+     "linkControllers": 4,
+     "linkGroups": 8,
+     "linkTargets": 160,
+     "linksHash": "620d4e09dc7166e5ad40ce9927c1966503a8f1304cdd52bcb16efaaaeebf6a63",
+     "segmentVersions": {
+      "6": 2
+     },
+     "logicFormat": "disk"
+    },
+    {
+     "path": "Isanth Type-PNR-25-B/ATTACHED_0",
+     "totalBlocks": 33,
+     "rawHash": "64cbb0787204b33e8aa477fd91ec1c047520bed10ff484285e263059e83515fb",
+     "contentHash": "b913b41f6776e880a965922974a391fe0ce626e59e2592945e379988dbe4106f",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "6": 2
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  }
+ ],
+ "samples": [
+  {
+   "sample": "samples/old-versions.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/old-versions.sment",
+   "exit": 1,
+   "entities": [
+    {
+     "path": "old-versions",
+     "totalBlocks": 122873,
+     "rawHash": "84b6f097790e7ea3a4c2a784f5d130bf27927d779a00ed61162253c049e46624",
+     "contentHash": "0f7d31cc2e9157c92246d843d6f3cfd91ba6d81cd05441192b45ccfdce2437c4",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "2": 1,
+      "3": 1,
+      "4": 3,
+      "5": 1,
+      "6": 4
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/old-versions-unasserted.sment",
+   "command": "GAMEVERIFY_ASSERT=0 rust/tools/game-verify/run.sh rust/tools/game-verify/samples/old-versions-unasserted.sment",
+   "exit": 1,
+   "entities": [
+    {
+     "path": "old-versions-unasserted",
+     "totalBlocks": 139265,
+     "rawHash": "93554b4751ffa9ab2edb497d6d6cd6cc855b5c7f70203d8c9aa515b98a91f28a",
+     "contentHash": "3fd2a3d716da5bbf079e60d5924deff4b1aaa936d2a7d830d572ffe055b40985",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "3": 3,
+      "5": 2,
+      "6": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/logic-old-disk.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/logic-old-disk.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "logic-old-disk",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 4,
+     "linkGroups": 5,
+     "linkTargets": 8,
+     "linksHash": "052a92b6d9eb0bd9a446de66cf6773996251ab00bd5f1a35c036abd8f36175f1",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "old disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/logic-disk-1026.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/logic-disk-1026.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "logic-disk-1026",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 4,
+     "linkGroups": 5,
+     "linkTargets": 8,
+     "linksHash": "2e6087e4382bd8808fcc28a7a1dbb6936cd887d597e6c22f97a3c107a7ee33bf",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/logic-disk-1025.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/logic-disk-1025.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "logic-disk-1025",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 4,
+     "linkGroups": 5,
+     "linkTargets": 8,
+     "linksHash": "2e6087e4382bd8808fcc28a7a1dbb6936cd887d597e6c22f97a3c107a7ee33bf",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/logic-network-1.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/logic-network-1.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "logic-network-1",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 4,
+     "linkGroups": 5,
+     "linkTargets": 8,
+     "linksHash": "8dd0297c2f3259970418ca1aeeba179599b576f4a4d42efd9c3113403b917c79",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "network"
+    }
+   ]
+  },
+  {
+   "sample": "samples/logic-network-2.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/logic-network-2.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "logic-network-2",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 4,
+     "linkGroups": 5,
+     "linkTargets": 8,
+     "linksHash": "401c2fccb3f90ed739fcc109a2b09755826b9fcaf441c5b5b1702cbc0d58df42",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "network"
+    }
+   ]
+  },
+  {
+   "sample": "samples/minimal-core.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/minimal-core.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "GV Minimal Core",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/plain-core.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/plain-core.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "GV Plain Core",
+     "totalBlocks": 1,
+     "rawHash": "4496b8ff3300fc486da1ddf2979effdb26efaaa9f97ae1c1847900dd5cef6f7c",
+     "contentHash": "b9d6ba0b20886fe88492396eb29768948e50cd0f5a74576533907f8bdd2f9e8d",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "6": 1
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  },
+  {
+   "sample": "samples/compressed-segments.sment",
+   "command": "rust/tools/game-verify/run.sh rust/tools/game-verify/samples/compressed-segments.sment",
+   "exit": 0,
+   "entities": [
+    {
+     "path": "GV Compressed Segments",
+     "totalBlocks": 32781,
+     "rawHash": "4a7ab395ce57a96ed3dda1f22d9a0d41c6481033d69f75824e14621dcd715971",
+     "contentHash": "acf1c056cba892b4ebfa91073ef54521e8422bd60262135ae182e665f9d6f1ad",
+     "linkControllers": 0,
+     "linkGroups": 0,
+     "linkTargets": 0,
+     "linksHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "segmentVersions": {
+      "6": 2
+     },
+     "logicFormat": "disk"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,20 @@
+[package]
+name = "yard-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Shared by the server (native) and the browser client (wasm32), so nothing in
+# here may touch the filesystem, threads or the clock.
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+# Pure-Rust zlib so the same code builds for wasm32.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+
+[dev-dependencies]
+serde_json.workspace = true
+# The game-side verifier describes what it read with SHA-256 hashes.
+sha2 = "0.10"

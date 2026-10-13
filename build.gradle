@@ -1,0 +1,50 @@
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group = 'com.starmade.yardhelper'
+version = '0.1.0'
+
+java {
+    // StarMade 0.304.x itself is Java 21 bytecode, so the mod can be too.
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Compile against the real game jar (never against hand-written stubs).
+    compileOnly files('libs/StarMade.jar', 'libs/vecmath.jar', 'libs/jbullet.jar', 'libs/fastutil-6.5.0.jar')
+
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+shadowJar {
+    archiveClassifier.set('')
+    relocate 'com.fasterxml.jackson', 'com.starmade.yardhelper.shadow.com.fasterxml.jackson'
+    exclude 'org/schema/**'
+    exclude 'api/**'
+    exclude 'javax/vecmath/**'
+    exclude 'com/bulletphysics/**'
+}
+
+// Offline harness: chat with the agent against an in-memory design, no game needed.
+//   gradle cli --args="--catalog /path/to/StarMade/data/config"
+tasks.register('cli', JavaExec) {
+    group = 'application'
+    description = 'Run the offline agent harness against an in-memory design.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.starmade.yardhelper.cli.YardCli'
+    standardInput = System.in
+}
