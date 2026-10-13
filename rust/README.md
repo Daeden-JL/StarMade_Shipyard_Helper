@@ -38,7 +38,7 @@ Not built yet: docking and undocking existing entities by hand (new turrets can 
 
 Known limits:
 
-- Nobody has looked at a design through a game client yet. What was checked: the game's own import and file-reading code, run headless, and one design made here that a running test server listed in its catalog and spawned from its console.
+- Designs made here reach the game through the sync (below) and are built on further in game shipyards; what was checked beyond that is the game's own import and file-reading code, run headless, against designs made here.
 - Textures on the slanted faces of wedges and the like are approximate. Models are lit like blocks; the glow maps of consoles and buttons are not used.
 - Docked entities are listed by their folders, so a leftover `ATTACHED_n` folder the game would ignore still shows up in the entity list. The whole-design view goes by the parent's dock list, as the game does, and leaves such a folder out.
 - Blueprints from before 2017 (`.smd2`, header versions 0 and 1) are refused.
@@ -173,6 +173,8 @@ Names follow the game's rule: letters, digits, spaces, `-` and `_`, no space at 
 Set `YARD_SYNC_TOKEN` here and the same value in the mod to make the sync endpoints refuse anyone else. Without accounts, anyone who can open this site can still edit every design, and through the sync every blueprint in the game.
 
 ## Run
+
+The [release packages](https://github.com/Daeden-JL/StarMade_Shipyard_Helper/releases/latest) hold a built server and client: unpack one and run `./start.sh /path/to/StarMade`. They are made with `scripts/package.sh` from a release build of `yard-server` and the client built by Trunk. To build from source:
 
 Needs a StarMade install to read block definitions and textures from (they are not shipped here).
 

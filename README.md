@@ -1,8 +1,43 @@
 # StarMade Shipyard Helper
 
-A server-side StarMade mod that lets players talk to a locally hosted AI agent to design ships and turrets inside a shipyard design. Players type `/yard <what to build>` while editing a design; the agent places blocks, links systems and reports back in chat.
+Two parts that work together:
 
-Status: early. The agent, tools and session handling run and are tested offline against a real local model. The in-game adapter compiles against StarMade 0.304.7 but has **not yet been run in a server** (see "What is not verified yet").
+- **A web shipyard** (`rust/`): open a StarMade blueprint in the browser, look at it in 3D with the game's own textures, edit it with build-mode tools, smooth hulls, move the core, cut out turrets, import 3D models, chat with an assistant that builds for you, and download it as a `.sment` the game imports.
+- **A server mod** (`src/`): keeps the game server's blueprint catalog and the designs held in its shipyards in step with the web shipyard, and gives players an in-game `/yard <what to build>` assistant.
+
+![The whole design, with docked turrets in place and the logic and rails panel](docs/screenshots/whole-design.png)
+
+## Install
+
+Download the [latest release](https://github.com/Daeden-JL/StarMade_Shipyard_Helper/releases/latest).
+
+**Web shipyard.** Unpack `shipyard-<version>-<os>-<arch>.tar.gz` and run
+
+```
+./start.sh /path/to/StarMade
+```
+
+where the path is the game install that holds `data/` and `version.txt` (the shipyard reads block definitions, textures and models from it; nothing of the game ships here). Then open http://127.0.0.1:4280. Add `0.0.0.0:4280` as a second argument to serve the whole network. Packages are built for Linux (x86_64, arm64) and macOS (Apple silicon); on other systems build from source as described in [`rust/README.md`](rust/README.md).
+
+**Server mod.** Copy `StarMade_Shipyard_Helper-<version>.jar` into the game server's `mods/` folder and start the server once; it writes `moddata/StarMade_Shipyard_Helper/config.properties`. Set `sync.url` there to the web shipyard's address as the game server reaches it, for example `http://192.168.1.10:4280`, and restart. Clients do not need the mod.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Editing a ship with the build tools and block palette](docs/screenshots/editing.png) Build tools, brush and mirror, block palette | ![The Smooth tool](docs/screenshots/smooth.png) Hull smoothing with wedges, corners, tetras and heptas |
+| ![Moving the core](docs/screenshots/move-core.png) Moving the core, with the nose and top directions shown | ![The assistant](docs/screenshots/assistant.png) The assistant: a local model or Claude builds in the open design |
+| ![A station](docs/screenshots/station.png) A station with docked parts | ![A fighter](docs/screenshots/fighter.png) A fighter with 44 docked entities |
+
+<img src="docs/screenshots/sync.png" width="280" align="right" alt="Sync with a shipyard design in the game">
+
+**Game server sync.** With the mod installed, every blueprint in the server's catalog appears in the web shipyard and edits go both ways. A design can be linked to a design held in a game shipyard: blocks placed in the game show up in the browser within seconds, and edits made in the browser replace the design in the shipyard. The last 20 synced versions are kept and any of them can be opened or restored.
+
+<br clear="all">
+
+## The server mod
+
+The mod's assistant lets players talk to a locally hosted model to design ships and turrets inside a shipyard design. Players type `/yard <what to build>` while editing a design; the agent places blocks, links systems and reports back in chat. The blueprint sync runs on a live 0.304.7 server; the in-game assistant is tested offline against a real local model, and the checks under "What is not verified yet" are for it.
 
 ## How it works
 
