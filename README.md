@@ -37,7 +37,7 @@ where the path is the game install that holds `data/` and `version.txt` (the shi
 
 ## The server mod
 
-The mod's assistant lets players talk to a locally hosted model to design ships and turrets inside a shipyard design. Players type `/yard <what to build>` while editing a design; the agent places blocks, links systems and reports back in chat. The blueprint sync runs on a live 0.304.7 server; the in-game assistant is tested offline against a real local model, and the checks under "What is not verified yet" are for it.
+The mod's assistant lets players talk to a locally hosted model to design ships and turrets inside a shipyard design. Players type `/yard <what to build>` while editing a design; the agent places blocks, links systems and reports back in chat. The blueprint sync runs on a live 0.305.11 server; the in-game assistant is tested offline against a real local model, and the checks under "What is not verified yet" are for it.
 
 ## How it works
 
@@ -60,7 +60,7 @@ The mod's assistant lets players talk to a locally hosted model to design ships 
 
 ## Build
 
-Needs JDK 21 and the game's jars in `libs/` (not redistributable, gitignored): `StarMade.jar`, `vecmath.jar`, `jbullet.jar`, `fastutil-6.5.0.jar` from a 0.304.7 install.
+Needs JDK 21 and the game's jars in `libs/` (not redistributable, gitignored): `StarMade.jar`, `vecmath.jar`, `jbullet.jar`, `fastutil-6.5.0.jar` from a 0.305.11 install (0.304.7 builds too).
 
 ```
 make test     # unit tests
@@ -131,7 +131,7 @@ It prints every model step and tool call, and `:slice [y]`, `:side`, `:info`, `:
 
 ## What is not verified yet
 
-These need a running 0.304.7 server and a client, and are what `/yard_debug` is for:
+These need a running 0.305.11 server and a client, and are what `/yard_debug` is for:
 
 1. `/yard_debug where` - the mod finds the design the player is editing.
 2. `/yard_debug axes` - red points right (+X), green up (+Y), blue forward (+Z).
