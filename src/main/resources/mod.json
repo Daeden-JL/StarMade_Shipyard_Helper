@@ -2,7 +2,7 @@
   "name": "StarMade_Shipyard_Helper",
   "author": "Daeden",
   "description": "Talk to a local AI agent to design ships and turrets inside a shipyard design.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "starmade_version": "0.304.7",
   "client_mod": false,
   "server_mod": true,

@@ -6,7 +6,7 @@ default-members = ["crates/yard-core", "crates/yard-import", "crates/yard-agent"
 members = ["crates/yard-core", "crates/yard-import", "crates/yard-agent", "crates/yard-server", "crates/yard-ui"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"

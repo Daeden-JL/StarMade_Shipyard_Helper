@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.starmade.yardhelper'
-version = '0.1.0'
+version = '0.2.0'
 
 java {
     // StarMade 0.304.x itself is Java 21 bytecode, so the mod can be too.
