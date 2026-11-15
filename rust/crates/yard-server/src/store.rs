@@ -47,6 +47,14 @@ impl Store {
                             s.modified = s.created;
                             write_whole(&path, &serde_json::to_vec_pretty(&s)?)?;
                         }
+                        // And those stored before the kind of entity was kept get that.
+                        if s.entity_type.is_none() {
+                            let file = std::fs::read(path.with_extension("sment")).ok();
+                            if let Some(header) = file.and_then(|bytes| yard_core::blueprint::header_of_sment(&bytes).ok()) {
+                                s.entity_type = Some(header.entity_type);
+                                write_whole(&path, &serde_json::to_vec_pretty(&s)?)?;
+                            }
+                        }
                         summaries.insert(s.id.clone(), s);
                     }
                     None => tracing::warn!("ignoring unreadable summary {}", path.display()),

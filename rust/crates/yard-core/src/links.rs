@@ -64,7 +64,7 @@ pub mod flag {
 }
 
 /// Block types the rules name outright, by the game's block numbers.
-mod id {
+pub(crate) mod id {
     pub const CORE: u16 = 1;
     pub const SALVAGE_COMPUTER: u16 = 4;
     pub const THRUSTER: u16 = 8;
@@ -113,6 +113,17 @@ const STATION_SYSTEMS: [u16; 13] = [112, 113, 211, 212, 213, 215, 217, 259, 347,
 /// The factory blocks, which ships have systems for too where the server
 /// allows factories on ships (`ALLOW_FACTORY_ON_SHIPS`, on by default).
 const FACTORY_SYSTEMS: [u16; 7] = [112, 211, 212, 213, 215, 217, 259];
+
+/// Whether a block only does something on a ship (thrusters, jump drives...).
+pub fn ship_only(ty: u16) -> bool {
+    SHIP_SYSTEMS.contains(&ty)
+}
+
+/// Whether a block only does something on a station. Factories count as
+/// working on ships too, as the server allows by default.
+pub fn station_only(ty: u16) -> bool {
+    STATION_SYSTEMS.contains(&ty) && !FACTORY_SYSTEMS.contains(&ty)
+}
 
 impl LinkTraits {
     pub fn of(def: &BlockDef) -> Self {

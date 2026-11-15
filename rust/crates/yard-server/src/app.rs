@@ -65,6 +65,10 @@ pub struct AppState {
     /// How models are reached, and the chat of each design.
     pub(crate) chat_config: crate::chat::ChatConfig,
     pub(crate) chats: crate::chat::Chats,
+    /// Long work running in the background, such as smoothing a big ship.
+    pub(crate) jobs: crate::jobs::Jobs,
+    /// Which block makes which shape, for smoothing on the server.
+    shaper: yard_core::smooth::Shaper,
 }
 
 impl AppState {
@@ -96,6 +100,11 @@ impl AppState {
             })
             .collect();
         let catalog_json = Bytes::from(serde_json::to_vec(&blocks)?);
+        // Built from the same list the browser gets, so both smooth alike.
+        let mut shaper = yard_core::smooth::Shaper::default();
+        for b in &blocks {
+            shaper.add(b.id, b.shape, b.slab, b.base, b.sides);
+        }
         let hull_palette = crate::importer::hull_palette(&catalog, &colours);
 
         let store = Store::open(&config.data_dir.join("designs"))?;
@@ -121,6 +130,8 @@ impl AppState {
             hull_palette,
             chat_config: crate::chat::ChatConfig::from_env(),
             chats: Default::default(),
+            jobs: Default::default(),
+            shaper,
         }))
     }
 
@@ -145,10 +156,22 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/designs/{id}/chat/stop", post(chat_stop))
         .route("/api/import/formats", get(import_formats))
         .route("/api/designs/import", post(import_model))
+        .route("/api/designs/import-job", post(import_job))
+        .route("/api/designs/{id}/piece-job", post(piece_job))
+        .route("/api/designs/{id}/piece-blueprint", post(piece_blueprint))
+        .route("/api/designs/{id}/source", post(read_source))
+        .route("/api/jobs/{job}/source", get(source_file))
+        .route("/api/designs/{id}/dock-from", post(dock_from))
+        .route("/api/designs/{id}/merge", post(merge_piece))
+        .route("/api/jobs/{job}/piece", get(piece_file))
         .route("/api/designs/{id}", get(get_design).delete(delete_design))
         .route("/api/designs/{id}/file", get(get_design_file))
         .route("/api/designs/{id}/steps", post(step))
         .route("/api/designs/{id}/relocate-core", post(relocate_core))
+        .route("/api/designs/{id}/convert", post(convert_design))
+        .route("/api/designs/{id}/smooth", post(smooth_design))
+        .route("/api/jobs/{job}", get(job_status))
+        .route("/api/jobs/{job}/stop", post(stop_job))
         .route("/api/designs/{id}/move-rail", post(move_rail))
         .route("/api/designs/{id}/fit-pivots", post(fit_pivots))
         .route("/api/designs/{id}/clone-docked", post(clone_docked))
@@ -397,6 +420,139 @@ async fn relocate_core(
     .await
 }
 
+/// Starts a smoothing pass over a whole entity in the background. The page
+/// follows it at `/api/jobs/<job>`; the pass goes in as one step, so Undo
+/// takes it back, unless the design was edited meanwhile.
+async fn smooth_design(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Json(request): Json<yard_core::api::SmoothRequest>,
+) -> Result<Json<yard_core::api::JobStarted>, ApiError> {
+    blocking(move || {
+        let entity = state.sessions.entity_at(&state.store, &id, request.rev, &request.entity)?;
+        let first = if request.again { "Getting ready to smooth again from scratch" } else { "Getting ready to smooth" };
+        let (job_id, job) = state.jobs.start(&id, first).map_err(|why| ApiError(StatusCode::CONFLICT, why))?;
+        let worker = state.clone();
+        std::thread::Builder::new()
+            .name("smoothing".into())
+            .spawn(move || run_smoothing(&worker, &id, &request, &entity, &job))
+            .map_err(|e| {
+                tracing::error!("cannot start a smoothing thread: {e}");
+                ApiError(StatusCode::INTERNAL_SERVER_ERROR, "The server could not start the work.".into())
+            })?;
+        Ok(Json(yard_core::api::JobStarted { job: job_id }))
+    })
+    .await
+}
+
+/// The smoothing pass itself, on its own thread: planned on a copy of the
+/// entity, then written as one step if the design has not moved on.
+fn run_smoothing(state: &AppState, id: &str, request: &yard_core::api::SmoothRequest, entity: &yard_core::Entity, job: &crate::jobs::Job) {
+    use yard_core::api::JobState;
+    use yard_core::edit::{Op, When};
+    let started = std::time::Instant::now();
+    let opts = yard_core::smooth::Smoothing { step: request.step, inside: request.inside, sharpen: request.sharpen };
+    let shaper = &state.shaper;
+    // The pass's own steps, then writing the blocks.
+    let stages = 1 + if request.again { yard_core::smooth::resmooth_stages(&opts) } else { yard_core::smooth::smooth_stages(&opts) };
+    let progress = |stage: yard_core::smooth::Stage, what: &str, done: u64, total: u64| job.report(stage.number, stages, what, done, total);
+    let (whole, reshape, samples) = (|b| shaper.whole(b), |b, f: &yard_core::smooth::Form| shaper.reshape(b, f), |b| shaper.samples(b));
+    let planned = if request.again {
+        yard_core::smooth::resmooth_entity_progress(entity, &opts, whole, reshape, samples, |b| shaper.unshape(b), &progress)
+    } else {
+        yard_core::smooth::smooth_entity_progress(entity, &opts, whole, reshape, samples, &progress)
+    };
+    let Some(planned) = planned else {
+        return job.finish(JobState::Stopped, "Stopped. Nothing was changed.", None, 0, 0);
+    };
+    let (emptied, planned): (Vec<_>, Vec<_>) = planned.into_iter().partition(|(_, b)| b.is_air());
+    let (cells, added): (Vec<_>, Vec<_>) = planned.into_iter().partition(|(p, _)| !entity.get(*p).is_air());
+    let count = cells.len() + added.len() + emptied.len();
+    if count == 0 {
+        let message = if request.again { "Smoothing it again from scratch changes nothing." } else { "Nothing more to smooth at this step height." };
+        return job.finish(JobState::Done, message, None, 0, 0);
+    }
+    if !job.report(stages, stages, &format!("Writing {count} blocks"), 0, 0) {
+        return job.finish(JobState::Stopped, "Stopped. Nothing was changed.", None, 0, 0);
+    }
+    let mut ops = Vec::new();
+    for (cells, when) in [(cells, When::Occupied), (added, When::Empty), (emptied, When::Occupied)] {
+        if !cells.is_empty() {
+            ops.push(Op::Set { cells, when });
+        }
+    }
+    let step = yard_core::api::StepRequest { rev: request.rev, entity: request.entity.clone(), ops };
+    match state.sessions.step_within(&state.store, &state.catalog, id, &step, u64::MAX) {
+        Ok(done) => {
+            tracing::info!("smoothed {count} blocks of design {id} in {:.1} s", started.elapsed().as_secs_f64());
+            let message = if request.again {
+                format!("Smoothed again from scratch: {count} blocks changed. Undo takes it back.")
+            } else {
+                format!("Smoothed {count} blocks into wedges, corner pieces and heptas. Press again for another pass; Undo takes this one back.")
+            };
+            job.finish(JobState::Done, message, Some(done.rev), done.undo, done.redo);
+        }
+        Err(StepError::Stale) => job.finish(JobState::Failed, "The design was edited while it was being smoothed, so nothing was written. Smooth it again.", None, 0, 0),
+        Err(e) => {
+            let ApiError(_, why) = ApiError::from(e);
+            job.finish(JobState::Failed, why, None, 0, 0);
+        }
+    }
+}
+
+async fn job_status(State(state): State<Arc<AppState>>, UrlPath(job): UrlPath<String>) -> Result<Json<yard_core::api::JobStatus>, ApiError> {
+    let job = state.jobs.get(&job).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "That work is over and forgotten.".into()))?;
+    Ok(Json(job.status()))
+}
+
+async fn stop_job(State(state): State<Arc<AppState>>, UrlPath(job): UrlPath<String>) -> StatusCode {
+    match state.jobs.get(&job) {
+        Some(job) => {
+            job.stop();
+            StatusCode::NO_CONTENT
+        }
+        None => StatusCode::NOT_FOUND,
+    }
+}
+
+/// The block a new station starts from: a Build Block, as in the game.
+fn first_station_block(catalog: &yard_core::catalog::Catalog) -> yard_core::Block {
+    let ty = catalog.by_name("Build Block").map_or(yard_core::convert::BUILD_BLOCK, |d| d.id);
+    yard_core::Block::new(ty, 0, false)
+}
+
+/// What a kind of entity is called in a request: "ship" or "station".
+fn kind_named(word: &str) -> Option<yard_core::convert::Kind> {
+    match word {
+        "ship" => Some(yard_core::convert::Kind::Ship),
+        "station" => Some(yard_core::convert::Kind::Station),
+        _ => None,
+    }
+}
+
+/// Turns a ship into a station or a station into a ship.
+async fn convert_design(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Json(request): Json<yard_core::api::ConvertRequest>,
+) -> Result<Json<yard_core::api::Restructured>, ApiError> {
+    let to = kind_named(&request.to).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "Say \"ship\" or \"station\".".into()))?;
+    blocking(move || {
+        // A game shipyard builds ships only.
+        if to == yard_core::convert::Kind::Station && state.sync.yard_link(&state.store, &id).is_some() {
+            return Err(ApiError(StatusCode::CONFLICT, "The design is linked to a shipyard in the game, which only builds ships. Unlink it first.".into()));
+        }
+        let catalog = &state.catalog;
+        let name_of = |ty: u16| catalog.get(ty).map_or_else(|| format!("block {ty}"), |d| d.name.clone());
+        let (rev, notes) = state.sessions.restructure(&state.store, &id, request.rev, |bp| {
+            yard_core::convert::convert(bp, to).map(|done| yard_core::convert::notes(&done, to, name_of))
+        })?;
+        tracing::info!("design {id} is a {} now", to.word());
+        Ok(Json(yard_core::api::Restructured { rev, entity: String::new(), notes }))
+    })
+    .await
+}
+
 /// Moves the rail block a docked entity hangs from, with or without the entity.
 async fn move_rail(
     State(state): State<Arc<AppState>>,
@@ -533,7 +689,11 @@ async fn new_design(State(state): State<Arc<AppState>>, Json(request): Json<NewD
     blocking(move || {
         // One name, one design: the game's catalog has a single blueprint per name.
         let name = free_name(&name, |n| state.store.has_name(n));
-        let bp = Blueprint::new_ship(&name, &state.game_version);
+        let bp = if request.station {
+            Blueprint::new_station(&name, &state.game_version, first_station_block(&state.catalog))
+        } else {
+            Blueprint::new_ship(&name, &state.game_version)
+        };
         let id = Store::new_id();
         let broken = |e: String| {
             tracing::error!("creating design: {e}");
@@ -616,6 +776,9 @@ struct ImportParams {
     turn: u8,
     #[serde(default)]
     mirror: bool,
+    /// Make a station of it instead of a ship.
+    #[serde(default)]
+    station: bool,
     #[serde(default)]
     smooth: bool,
     /// The step height smoothing bevels, in blocks.
@@ -644,38 +807,403 @@ async fn import_model(State(state): State<Arc<AppState>>, Query(params): Query<I
     if body.is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "The upload was empty.".into()));
     }
+    blocking(move || import_now(&state, &params, &body, &|_, _| true).map(Json)).await
+}
+
+/// Makes a design from a 3D model in the background, for a page that shows
+/// how far it has got; follow it at `/api/jobs/<job>`, which names the new
+/// design once it is done.
+async fn import_job(State(state): State<Arc<AppState>>, Query(params): Query<ImportParams>, body: Bytes) -> Result<Json<yard_core::api::JobStarted>, ApiError> {
+    if body.is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "The upload was empty.".into()));
+    }
+    // Each import is its own piece of work: several may run at once.
+    let key = format!("import {}", Store::new_id());
+    let (job_id, job) = state.jobs.start(&key, "Getting ready").map_err(|why| ApiError(StatusCode::CONFLICT, why))?;
+    let worker = state.clone();
+    std::thread::Builder::new()
+        .name("import".into())
+        .spawn(move || {
+            use yard_core::api::JobState;
+            let stages = import_stages(params.station);
+            let step = |n: u32, what: &str| job.report(n, stages, what, 0, 0);
+            match import_now(&worker, &params, &body, &step) {
+                Ok(done) => {
+                    job.made(&done.summary.id);
+                    job.finish(JobState::Done, done.notes.join(" "), None, 0, 0);
+                }
+                Err(ApiError(_, why)) if why == crate::importer::STOPPED => job.finish(JobState::Stopped, why, None, 0, 0),
+                Err(ApiError(_, why)) => job.finish(JobState::Failed, why, None, 0, 0),
+            }
+        })
+        .map_err(|e| {
+            tracing::error!("cannot start an import thread: {e}");
+            ApiError(StatusCode::INTERNAL_SERVER_ERROR, "The server could not start the work.".into())
+        })?;
+    Ok(Json(yard_core::api::JobStarted { job: job_id }))
+}
+
+/// What the import dialog chose, as the importer takes it.
+fn import_choices(params: &ImportParams) -> crate::importer::Choices {
+    crate::importer::Choices {
+        longest: params.longest,
+        solid: params.solid,
+        shell: params.shell,
+        up: match params.up.as_str() {
+            "y" => Some(yard_import::Up::Y),
+            "z" => Some(yard_import::Up::Z),
+            _ => None,
+        },
+        turn: params.turn,
+        mirror: params.mirror,
+        smooth: params.smooth,
+        step: params.step.min(yard_core::smooth::MOST_STEP),
+    }
+}
+
+/// Cuts a 3D model into a piece of blocks to fit into the design, in the
+/// background. Nothing is saved: the piece is kept with the job, the page
+/// downloads it from `/api/jobs/<job>/piece` to show where it would go, and
+/// `/api/designs/<id>/merge` locks it in.
+async fn piece_job(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Query(params): Query<ImportParams>,
+    body: Bytes,
+) -> Result<Json<yard_core::api::JobStarted>, ApiError> {
+    if body.is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "The upload was empty.".into()));
+    }
+    if state.store.summary(&id).is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "No such design.".into()));
+    }
+    let (job_id, job) = state.jobs.start(&format!("piece {}", Store::new_id()), "Getting ready").map_err(|why| ApiError(StatusCode::CONFLICT, why))?;
+    let worker = state.clone();
+    std::thread::Builder::new()
+        .name("piece".into())
+        .spawn(move || {
+            use yard_core::api::JobState;
+            let stages = crate::importer::STEPS;
+            let step = |n: u32, what: &str| job.report(n, stages, what, 0, 0);
+            let state = &worker;
+            let made = crate::importer::piece_from_model(&state.catalog, &state.hull_palette, &state.game_version, "Piece", &params.name, &body, &import_choices(&params), &step);
+            match made {
+                Ok((piece, notes)) => {
+                    let blocks = piece.root.entity.block_count();
+                    job.keep(Arc::new(piece));
+                    let mut message = vec![format!("{} blocks, ready to place.", thousands_plain(blocks))];
+                    message.extend(notes.into_iter().filter(|n| !n.starts_with("Made of")));
+                    job.finish(JobState::Done, message.join(" "), None, 0, 0);
+                }
+                Err(why) if why == crate::importer::STOPPED => job.finish(JobState::Stopped, "Stopped.", None, 0, 0),
+                Err(why) => job.finish(JobState::Failed, why, None, 0, 0),
+            }
+        })
+        .map_err(|e| {
+            tracing::error!("cannot start a piece thread: {e}");
+            ApiError(StatusCode::INTERNAL_SERVER_ERROR, "The server could not start the work.".into())
+        })?;
+    Ok(Json(yard_core::api::JobStarted { job: job_id }))
+}
+
+/// A count with commas between thousands, for messages.
+fn thousands_plain(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The piece a job made, as a `.sment` for the page to draw.
+async fn piece_file(State(state): State<Arc<AppState>>, UrlPath(job): UrlPath<String>) -> Result<Response, ApiError> {
+    let piece = state.jobs.get(&job).and_then(|j| j.kept::<Blueprint>()).ok_or_else(gone_piece)?;
+    let bytes = blocking(move || piece.to_sment().map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))).await?;
+    Ok(([(header::CONTENT_TYPE, "application/zip")], bytes).into_response())
+}
+
+fn gone_piece() -> ApiError {
+    ApiError(StatusCode::NOT_FOUND, "That model is no longer kept (they are kept an hour). Add it again.".into())
+}
+
+/// What turning a block needs to know of its type, from the catalog.
+fn shape_of(catalog: &yard_core::catalog::Catalog, ty: u16) -> (yard_core::catalog::Shape, bool) {
+    use yard_core::catalog::Shape;
+    catalog.get(ty).map_or((Shape::Cube, false), |d| (d.shape, d.shape == Shape::Cube && (d.slab > 0 || d.sides == 6)))
+}
+
+/// Where the blocks of a blueprint piece come from: an uploaded `.sment`
+/// (`name` set, the file in the body) or a design kept here (`from`).
+#[derive(Deserialize)]
+struct BlueprintPieceParams {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    from: String,
+    /// A blueprint read before with `/api/designs/<id>/source`.
+    #[serde(default)]
+    job: String,
+    /// Which of its entities: "" for the main one, "ATTACHED_0"... for docked ones.
+    #[serde(default)]
+    entity: String,
+}
+
+/// Takes an entity of a blueprint as a piece to place in the design, like
+/// [`piece_job`] does a model: the job is done at once, and the page
+/// downloads the piece and locks it in the same way. Its links come with it.
+async fn piece_blueprint(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Query(params): Query<BlueprintPieceParams>,
+    body: Bytes,
+) -> Result<Json<yard_core::api::JobStarted>, ApiError> {
+    if state.store.summary(&id).is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "No such design.".into()));
+    }
     blocking(move || {
-        let stem = params.name.rsplit(['/', '\\']).next().unwrap_or("").rsplit_once('.').map_or(params.name.as_str(), |(stem, _)| stem);
-        let wanted = Some(game_name(stem)).filter(|n| !n.is_empty()).unwrap_or_else(|| "Imported model".into());
-        let name = free_name(&wanted, |n| state.store.has_name(n));
-        let choices = crate::importer::Choices {
-            longest: params.longest,
-            solid: params.solid,
-            shell: params.shell,
-            up: match params.up.as_str() {
-                "y" => Some(yard_import::Up::Y),
-                "z" => Some(yard_import::Up::Z),
-                _ => None,
-            },
-            turn: params.turn,
-            mirror: params.mirror,
-            smooth: params.smooth,
-            step: params.step.min(yard_core::smooth::MOST_STEP),
+        let (taken, source) = if !params.job.is_empty() {
+            let kept = state.jobs.get(&params.job).and_then(|j| j.kept::<SourceKept>()).ok_or_else(gone_source)?;
+            kept.with(&state, |bp| (yard_core::merge::take(bp, &params.entity), bp.name.clone()))?
+        } else if !params.from.is_empty() {
+            let name = state.store.summary(&params.from).map(|s| s.name).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "No such design to take blocks from.".into()))?;
+            let taken = state.sessions.read(&state.store, &params.from, |bp| yard_core::merge::take(bp, &params.entity))?;
+            (taken, name)
+        } else {
+            if body.is_empty() {
+                return Err(ApiError(StatusCode::BAD_REQUEST, "The upload was empty.".into()));
+            }
+            let bp = Blueprint::from_sment_with(&body, &state.catalog).map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, format!("{} could not be read as a blueprint ({e}).", params.name)))?;
+            (yard_core::merge::take(&bp, &params.entity), bp.name.clone())
         };
-        let (bp, notes) = crate::importer::ship_from_model(&state.catalog, &state.hull_palette, &state.game_version, &name, &params.name, &body, &choices)
-            .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-        let id = Store::new_id();
-        let broken = |e: String| {
-            tracing::error!("saving imported model: {e}");
-            ApiError(StatusCode::INTERNAL_SERVER_ERROR, "The ship could not be saved.".into())
-        };
-        let bytes = bp.to_sment().map_err(|e| broken(e.to_string()))?;
-        let summary = Summary::of(&id, &bp, &state.catalog, unix_now());
-        let summary = state.store.save(summary, &bytes).map_err(|e| broken(format!("{e:#}")))?;
-        tracing::info!("imported model \"{}\" as design {id} ({} blocks)", name, summary.blocks);
-        Ok(Json(yard_core::api::ImportResult { summary: marked(&state, summary), notes }))
+        let taken = taken.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "The blueprint has no such entity.".into()))?;
+        let blocks = taken.piece.block_count();
+        if blocks == 0 {
+            return Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, format!("{source} has no blocks to add besides its ship core.")));
+        }
+        let links: usize = taken.piece.links().values().flat_map(|g| g.values()).map(|t| t.len()).sum();
+        let mut kept = Blueprint::new_ship("Piece", &state.game_version);
+        kept.root.entity = taken.piece;
+        kept.root.header.refresh(&kept.root.entity);
+        let (job_id, job) = state.jobs.start(&format!("piece {}", Store::new_id()), "Reading the blueprint").map_err(|why| ApiError(StatusCode::CONFLICT, why))?;
+        job.keep(Arc::new(kept));
+        let mut message = vec![match links {
+            0 => format!("{} blocks from {source}, ready to place.", thousands_plain(blocks)),
+            1 => format!("{} blocks and 1 link from {source}, ready to place.", thousands_plain(blocks)),
+            n => format!("{} blocks and {} links from {source}, ready to place.", thousands_plain(blocks), thousands_plain(n as u64)),
+        }];
+        if taken.core_left_out {
+            message.push("Its ship core is left out.".into());
+        }
+        match taken.docked_left_out {
+            0 => {}
+            1 => message.push("The entity docked to it does not come with it.".into()),
+            n => message.push(format!("The {n} entities docked to it do not come with it.")),
+        }
+        job.finish(yard_core::api::JobState::Done, message.join(" "), None, 0, 0);
+        Ok(Json(yard_core::api::JobStarted { job: job_id }))
     })
     .await
+}
+
+/// A blueprint read to take something from, kept with its job: an upload
+/// as it is, a design of the shipyard by its id (read again when used, so a
+/// big one is not held twice).
+enum SourceKept {
+    Upload(Box<Blueprint>),
+    Design(String),
+}
+
+impl SourceKept {
+    fn with<T>(&self, state: &AppState, read: impl FnOnce(&Blueprint) -> T) -> Result<T, ApiError> {
+        match self {
+            SourceKept::Upload(bp) => Ok(read(bp)),
+            SourceKept::Design(id) => Ok(state.sessions.read(&state.store, id, read)?),
+        }
+    }
+}
+
+fn gone_source() -> ApiError {
+    ApiError(StatusCode::NOT_FOUND, "That blueprint is no longer kept (they are kept an hour). Choose it again.".into())
+}
+
+/// Reads a blueprint (uploaded, `name` set) or another design (`from`) and
+/// keeps it a while, saying what can be taken from it: its hull blocks as
+/// a piece (`piece-blueprint?job=`), or a turret to dock (`dock-from`).
+async fn read_source(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Query(params): Query<BlueprintPieceParams>,
+    body: Bytes,
+) -> Result<Json<yard_core::api::SourceRead>, ApiError> {
+    if state.store.summary(&id).is_none() {
+        return Err(ApiError(StatusCode::NOT_FOUND, "No such design.".into()));
+    }
+    blocking(move || {
+        let kept = if !params.from.is_empty() {
+            if state.store.summary(&params.from).is_none() {
+                return Err(ApiError(StatusCode::NOT_FOUND, "No such design to take from.".into()));
+            }
+            SourceKept::Design(params.from.clone())
+        } else {
+            if body.is_empty() {
+                return Err(ApiError(StatusCode::BAD_REQUEST, "The upload was empty.".into()));
+            }
+            SourceKept::Upload(Box::new(Blueprint::from_sment_with(&body, &state.catalog).map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, format!("{} could not be read as a blueprint ({e}).", params.name)))?))
+        };
+        let (name, blocks, dockable) = kept.with(&state, |bp| {
+            let root = &bp.root.entity;
+            let core = u64::from(root.get(yard_core::Pos::new(0, 0, 0)).ty() == yard_core::edit::CORE_TYPE);
+            let dockable = yard_core::clone::dockable(bp)
+                .into_iter()
+                .map(|d| yard_core::api::DockableInfo { path: d.path, blocks: d.blocks, docked: d.docked, turret: d.rail_ty == yard_core::dock::TURRET_AXIS, rail_ty: d.rail_ty })
+                .collect();
+            (bp.name.clone(), root.block_count() - core, dockable)
+        })?;
+        let (job_id, job) = state.jobs.start(&format!("source {}", Store::new_id()), "Reading the blueprint").map_err(|why| ApiError(StatusCode::CONFLICT, why))?;
+        job.keep(Arc::new(kept));
+        job.finish(yard_core::api::JobState::Done, String::new(), None, 0, 0);
+        Ok(Json(yard_core::api::SourceRead { job: job_id, name, blocks, dockable }))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SourceFileParams {
+    #[serde(default)]
+    entity: String,
+}
+
+/// What the page needs of a blueprint read before to show one of its
+/// entities docked: the blueprint, cut down to that entity.
+async fn source_file(State(state): State<Arc<AppState>>, UrlPath(job): UrlPath<String>, Query(params): Query<SourceFileParams>) -> Result<Response, ApiError> {
+    let kept = state.jobs.get(&job).and_then(|j| j.kept::<SourceKept>()).ok_or_else(gone_source)?;
+    let bytes = blocking(move || {
+        let trimmed = kept.with(&state, |bp| yard_core::clone::trimmed_to(bp, &params.entity))?;
+        trimmed.to_sment().map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+    })
+    .await?;
+    Ok(([(header::CONTENT_TYPE, "application/zip")], bytes).into_response())
+}
+
+/// Docks an entity of a blueprint read before (a turret...) into the
+/// design, with everything docked to it, as cloning does with one of its own.
+async fn dock_from(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Json(request): Json<yard_core::api::DockFromRequest>,
+) -> Result<Json<yard_core::api::Restructured>, ApiError> {
+    let place = match (&request.replace, &request.parent, request.at, request.facing) {
+        (Some(entity), _, _, _) => yard_core::clone::Place::Replace { entity: entity.clone() },
+        (None, Some(parent), Some([x, y, z]), Some(facing)) => yard_core::clone::Place::New { parent: parent.clone(), at: yard_core::Pos::new(x, y, z), facing },
+        _ => return Err(ApiError(StatusCode::BAD_REQUEST, "Say which entity it replaces, or where its rail goes (parent, at, facing).".into())),
+    };
+    let kept = state.jobs.get(&request.job).and_then(|j| j.kept::<SourceKept>()).ok_or_else(gone_source)?;
+    blocking(move || {
+        let path = request.path.clone();
+        // Only what is docked, read before the design is changed (it may be the same design).
+        let source = kept.with(&state, |bp| yard_core::clone::trimmed_to(bp, &path))?;
+        let (rev, made) = state.sessions.restructure(&state.store, &id, request.rev, |bp| yard_core::clone::dock_from(bp, &state.catalog, &source, &path, &place).map_err(|e| refusal_text(&e)))?;
+        tracing::info!("docked \"{path}\" of {} as \"{}\" in design {id}", source.name, made.child);
+        Ok(Json(yard_core::api::Restructured { rev, entity: made.child, notes: made.notes }))
+    })
+    .await
+}
+
+/// Locks a piece into an entity where the page put it: one step, which Undo takes back.
+async fn merge_piece(
+    State(state): State<Arc<AppState>>,
+    UrlPath(id): UrlPath<String>,
+    Json(request): Json<yard_core::api::MergeRequest>,
+) -> Result<Json<yard_core::api::MergeDone>, ApiError> {
+    use yard_core::edit::{Op, When};
+    let piece = state.jobs.get(&request.piece).and_then(|j| j.kept::<Blueprint>()).ok_or_else(gone_piece)?;
+    blocking(move || {
+        let catalog = &state.catalog;
+        let cells = yard_core::merge::placed(&piece.root.entity, &request.fit, &|ty| shape_of(catalog, ty));
+        let total = cells.len() as u64;
+        // Cells the design has a block in now, to say how many were kept back.
+        let entity = state.sessions.entity_at(&state.store, &id, request.rev, &request.entity)?;
+        let taken = cells.iter().filter(|(p, _)| !entity.get(*p).is_air()).count() as u64;
+        // Links only between blocks the piece really writes: not where the
+        // design keeps its own block, nor at its core, which nothing replaces.
+        let held: std::collections::HashSet<yard_core::Pos> = cells
+            .iter()
+            .map(|(p, _)| *p)
+            .filter(|p| {
+                let there = entity.get(*p);
+                !there.is_air() && (!request.replace || there.ty() == yard_core::edit::CORE_TYPE)
+            })
+            .collect();
+        drop(entity);
+        let mut linked = 0u64;
+        let links: Vec<Op> = yard_core::merge::placed_links(&piece.root.entity, &request.fit)
+            .into_iter()
+            .filter(|(c, _)| !held.contains(c))
+            .filter_map(|(controller, targets)| {
+                let targets: Vec<yard_core::Pos> = targets.into_iter().filter(|t| !held.contains(t)).collect();
+                linked += targets.len() as u64;
+                (!targets.is_empty()).then_some(Op::Link { controller, targets })
+            })
+            .collect();
+        let when = if request.replace { When::Always } else { When::Empty };
+        let mut ops = vec![Op::Set { cells, when }];
+        ops.extend(links);
+        let step = yard_core::api::StepRequest { rev: request.rev, entity: request.entity.clone(), ops };
+        let done = state.sessions.step_within(&state.store, catalog, &id, &step, u64::MAX)?;
+        let kept_back = if request.replace { 0 } else { taken };
+        tracing::info!("locked a piece of {total} blocks and {linked} links into design {id}");
+        Ok(Json(yard_core::api::MergeDone { rev: done.rev, undo: done.undo, redo: done.redo, written: total - kept_back, kept_back, linked }))
+    })
+    .await
+}
+
+/// How many steps making a design from a model takes: the importer's own,
+/// the core taken out for a station, and saving.
+fn import_stages(station: bool) -> u32 {
+    crate::importer::STEPS + u32::from(station) + 1
+}
+
+/// Makes and saves a design from a 3D model. `step` hears of each step as
+/// it starts, numbered as [`import_stages`] counts them, and stops the work
+/// by answering false.
+fn import_now(state: &AppState, params: &ImportParams, body: &[u8], step: &dyn Fn(u32, &str) -> bool) -> Result<yard_core::api::ImportResult, ApiError> {
+    let stopped = || ApiError(StatusCode::OK, crate::importer::STOPPED.into());
+    let stem = params.name.rsplit(['/', '\\']).next().unwrap_or("").rsplit_once('.').map_or(params.name.as_str(), |(stem, _)| stem);
+    let wanted = Some(game_name(stem)).filter(|n| !n.is_empty()).unwrap_or_else(|| "Imported model".into());
+    let name = free_name(&wanted, |n| state.store.has_name(n));
+    let choices = import_choices(params);
+    let made = crate::importer::ship_from_model(&state.catalog, &state.hull_palette, &state.game_version, &name, &params.name, body, &choices, step);
+    let (mut bp, mut notes) = match made {
+        Err(why) if why == crate::importer::STOPPED => return Err(stopped()),
+        other => other.map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e))?,
+    };
+    let mut next = crate::importer::STEPS + 1;
+    if params.station {
+        if !step(next, "Making it a station") {
+            return Err(stopped());
+        }
+        next += 1;
+        // Made as a ship round its core, then the core taken out.
+        yard_core::convert::convert(&mut bp, yard_core::convert::Kind::Station).map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        notes.push("Made as a station.".into());
+    }
+    if !step(next, "Saving the design") {
+        return Err(stopped());
+    }
+    let id = Store::new_id();
+    let broken = |e: String| {
+        tracing::error!("saving imported model: {e}");
+        ApiError(StatusCode::INTERNAL_SERVER_ERROR, "The design could not be saved.".into())
+    };
+    let bytes = bp.to_sment().map_err(|e| broken(e.to_string()))?;
+    let summary = Summary::of(&id, &bp, &state.catalog, unix_now());
+    let summary = state.store.save(summary, &bytes).map_err(|e| broken(format!("{e:#}")))?;
+    tracing::info!("imported model \"{}\" as design {id} ({} blocks)", name, summary.blocks);
+    Ok(yard_core::api::ImportResult { summary: marked(state, summary), notes })
 }
 
 fn unix_now() -> u64 {
@@ -990,6 +1518,10 @@ async fn link_yard(
     Json(request): Json<YardLinkRequest>,
 ) -> Result<Json<Option<YardLinkInfo>>, ApiError> {
     blocking(move || {
+        let station = state.sessions.read(&state.store, &id, |bp| bp.root.header.entity_type != yard_core::convert::SHIP).unwrap_or(false);
+        if station {
+            return Err(ApiError(StatusCode::CONFLICT, "A shipyard in the game builds ships only, and this design is a station.".into()));
+        }
         match state.sync.link_yard(&state.store, &id, &request) {
             Ok(()) => {}
             Err(LinkError::NoSuchDesign) => return Err(ApiError(StatusCode::NOT_FOUND, "No such design.".into())),
@@ -1145,6 +1677,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_smoothing_pass_runs_as_a_job_and_goes_in_as_one_step() {
+        let Some((app, state, _cleanup)) = test_app("smooth-job").await else { return };
+        let (_, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Stairs"}"#.into())).await;
+        let summary: Summary = serde_json::from_slice(&body).unwrap();
+        let (_, rev) = download(&app, &summary.id).await;
+        // A deck of grey hull with a step up on it.
+        let grey = state.catalog.by_name("Grey Basic Armor").map_or(5, |d| d.id);
+        let deck = Op::Fill { min: Pos::new(-6, -1, -6), max: Pos::new(6, -1, 6), block: Block::new(grey, 0, false), mode: FillMode::Solid, when: When::Empty, link: None };
+        let step_up = Op::Fill { min: Pos::new(1, 0, -6), max: Pos::new(6, 0, 6), block: Block::new(grey, 0, false), mode: FillMode::Solid, when: When::Empty, link: None };
+        let (status, body) = step(&app, &summary.id, rev, vec![deck, step_up]).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let rev = rev + 1;
+
+        let request = format!(r#"{{"rev":{rev},"entity":"","step":1,"inside":false,"sharpen":false}}"#);
+        let (status, _, body) = send(&app, "POST", &format!("/api/designs/{}/smooth", summary.id), Some(request)).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let started: yard_core::api::JobStarted = serde_json::from_slice(&body).unwrap();
+        let status = loop {
+            let (_, _, body) = send(&app, "GET", &format!("/api/jobs/{}", started.job), None).await;
+            let status: yard_core::api::JobStatus = serde_json::from_slice(&body).unwrap();
+            if status.state != yard_core::api::JobState::Running {
+                break status;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        assert_eq!(status.state, yard_core::api::JobState::Done, "{}", status.message);
+        assert_eq!((status.rev, status.undo), (Some(rev + 1), 2), "one more step on top of the edit");
+        // The pass's four steps (no inside, no sharpening) and writing: it ends on the last.
+        assert_eq!((status.stage, status.stages), (5, 5));
+        let (bp, now) = download(&app, &summary.id).await;
+        assert_eq!(now, rev + 1);
+        let wedges = bp.root.entity.counts_by_type().iter().filter(|(ty, _)| state.catalog.get(**ty).is_some_and(|d| d.shape == yard_core::catalog::Shape::Wedge)).count();
+        assert!(wedges > 0, "the step's edge is beveled");
+        // Undo takes the whole pass back.
+        let (status, body) = step(&app, &summary.id, now, vec![Op::Undo]).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let (bp, _) = download(&app, &summary.id).await;
+        assert!(bp.root.entity.counts_by_type().keys().all(|ty| state.catalog.get(*ty).is_none_or(|d| d.shape != yard_core::catalog::Shape::Wedge)));
+        // A request from an old revision is turned away before any work starts.
+        let request = format!(r#"{{"rev":{rev},"entity":"","step":1,"inside":false,"sharpen":false}}"#);
+        let (status, _, _) = send(&app, "POST", &format!("/api/designs/{}/smooth", summary.id), Some(request)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn a_station_is_made_and_converted_to_a_ship_and_back() {
+        let Some((app, _state, _cleanup)) = test_app("convert").await else { return };
+        let (status, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Outpost","station":true}"#.into())).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let summary: Summary = serde_json::from_slice(&body).unwrap();
+        assert_eq!((summary.blocks, summary.entity_type), (1, Some(yard_core::convert::STATION)));
+        let (bp, rev) = download(&app, &summary.id).await;
+        assert_eq!(bp.root.entity.get(Pos::new(0, 0, 0)).ty(), yard_core::convert::BUILD_BLOCK, "a station starts from a Build Block");
+
+        let convert = |rev: u64, to: &str| format!(r#"{{"rev":{rev},"to":"{to}"}}"#);
+        let uri = format!("/api/designs/{}/convert", summary.id);
+        let (status, _, body) = send(&app, "POST", &uri, Some(convert(rev, "ship"))).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let done: yard_core::api::Restructured = serde_json::from_slice(&body).unwrap();
+        assert!(done.notes.iter().any(|n| n.contains("took the place of")), "{:?}", done.notes);
+        let (bp, rev) = download(&app, &summary.id).await;
+        assert_eq!(bp.root.header.entity_type, yard_core::convert::SHIP);
+        assert_eq!(bp.root.entity.get(Pos::new(0, 0, 0)).ty(), Catalog::CORE);
+
+        // A ship already: refused, nothing changes.
+        let (status, _, _) = send(&app, "POST", &uri, Some(convert(rev, "ship"))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let (status, _, body) = send(&app, "POST", &uri, Some(convert(rev, "station"))).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let (bp, _) = download(&app, &summary.id).await;
+        assert_eq!(bp.root.header.entity_type, yard_core::convert::STATION);
+        assert_eq!(bp.root.entity.get(Pos::new(0, 0, 0)).ty(), yard_core::convert::BUILD_BLOCK);
+    }
+
+    #[tokio::test]
     async fn a_new_design_can_be_edited_undone_and_downloaded() {
         let Some((app, state, _cleanup)) = test_app("edit").await else { return };
         let (status, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Test Ship"}"#.into())).await;
@@ -1213,6 +1820,126 @@ mod tests {
         let on_disk = Blueprint::from_sment(&state.store.file(&summary.id).unwrap()).unwrap();
         assert_eq!(on_disk.root.entity.block_count(), 3);
         assert_eq!(state.store.list()[0].blocks, 3);
+    }
+
+    #[tokio::test]
+    async fn a_3d_model_becomes_a_station_as_a_job_that_counts_its_steps() {
+        let Some((app, state, _cleanup)) = test_app("import-job").await else { return };
+        let obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\nv 0 1 1\nf 5 6 7 8\nf 1 4 3 2\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n";
+        let request = Request::builder().method("POST").uri("/api/designs/import-job?name=Box.obj&longest=9&solid=true&station=true").body(Body::from(obj.as_bytes().to_vec())).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let started: yard_core::api::JobStarted = serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        let status = loop {
+            let (_, _, body) = send(&app, "GET", &format!("/api/jobs/{}", started.job), None).await;
+            let status: yard_core::api::JobStatus = serde_json::from_slice(&body).unwrap();
+            if status.state != yard_core::api::JobState::Running {
+                break status;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        assert_eq!(status.state, yard_core::api::JobState::Done, "{}", status.message);
+        // Read, cut, colour, made a station, saved: it ends on its last step.
+        assert_eq!((status.stage, status.stages), (5, 5));
+        assert!(status.message.contains("Made as a station"), "{}", status.message);
+        let id = status.design.expect("the job names the design it made");
+        assert_eq!(state.store.summary(&id).and_then(|s| s.entity_type), Some(yard_core::convert::STATION));
+    }
+
+    #[tokio::test]
+    async fn a_blueprint_is_placed_into_a_design_with_its_links_and_without_its_core() {
+        let Some((app, state, _cleanup)) = test_app("piece-bp").await else { return };
+        let (_, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Base"}"#.into())).await;
+        let base: Summary = serde_json::from_slice(&body).unwrap();
+        let (_, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Empty"}"#.into())).await;
+        let empty: Summary = serde_json::from_slice(&body).unwrap();
+
+        // A design with nothing but its core gives nothing to add.
+        let (status, _, body) = send(&app, "POST", &format!("/api/designs/{}/piece-blueprint?from={}", base.id, empty.id), None).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{}", String::from_utf8_lossy(&body));
+
+        // An uploaded section: a cannon computer linked to a barrel, a docked turret.
+        let mut section = Blueprint::new_ship("Gun", "test");
+        let e = &mut section.root.entity;
+        e.set(Pos::new(0, 0, 1), Block::new(6, 0, false));
+        e.set(Pos::new(0, 0, 2), Block::new(16, 0, false));
+        e.link(Pos::new(0, 0, 1), Pos::new(0, 0, 2), 16);
+        let request = Request::builder().method("POST").uri(format!("/api/designs/{}/piece-blueprint?name=Gun.sment", base.id)).body(Body::from(section.to_sment().unwrap())).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let started: yard_core::api::JobStarted = serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        let (_, _, body) = send(&app, "GET", &format!("/api/jobs/{}", started.job), None).await;
+        let status: yard_core::api::JobStatus = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status.state, yard_core::api::JobState::Done, "done at once");
+        assert!(status.message.contains("2 blocks and 1 link from Gun") && status.message.contains("core is left out"), "{}", status.message);
+
+        let (_, rev) = download(&app, &base.id).await;
+        // Turned to face right, and moved out along x.
+        let merge = format!(r#"{{"rev":{rev},"entity":"","piece":"{}","fit":{{"at":[4,0,0],"yaw":1}},"replace":false}}"#, started.job);
+        let (status, _, body) = send(&app, "POST", &format!("/api/designs/{}/merge", base.id), Some(merge)).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let done: yard_core::api::MergeDone = serde_json::from_slice(&body).unwrap();
+        assert_eq!((done.written, done.kept_back, done.linked), (2, 0, 1));
+        state.flush(true);
+        let (bp, _) = download(&app, &base.id).await;
+        let e = &bp.root.entity;
+        assert_eq!(e.get(Pos::new(5, 0, 0)).ty(), 6, "the computer, turned to the right");
+        assert_eq!(e.get(Pos::new(6, 0, 0)).ty(), 16);
+        assert!(yard_core::links::is_linked(e.links(), Pos::new(5, 0, 0), Pos::new(6, 0, 0)), "{:?}", e.links());
+        assert_eq!(e.counts_by_type().get(&Catalog::CORE), Some(&1), "still one core");
+    }
+
+    #[tokio::test]
+    async fn a_model_is_cut_into_a_piece_placed_and_locked_into_a_design() {
+        let Some((app, _state, _cleanup)) = test_app("piece").await else { return };
+        let (_, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Base"}"#.into())).await;
+        let summary: Summary = serde_json::from_slice(&body).unwrap();
+        let (_, rev) = download(&app, &summary.id).await;
+        // A row of hull from the core out to x = 3.
+        let (status, _) = step(&app, &summary.id, rev, vec![hull_row(1, 3)]).await;
+        assert_eq!(status, StatusCode::OK);
+        let rev = rev + 1;
+
+        let obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\nv 0 1 1\nf 5 6 7 8\nf 1 4 3 2\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n";
+        let request = Request::builder().method("POST").uri(format!("/api/designs/{}/piece-job?name=Box.obj&longest=5&solid=true", summary.id)).body(Body::from(obj.as_bytes().to_vec())).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let started: yard_core::api::JobStarted = serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        let status = loop {
+            let (_, _, body) = send(&app, "GET", &format!("/api/jobs/{}", started.job), None).await;
+            let status: yard_core::api::JobStatus = serde_json::from_slice(&body).unwrap();
+            if status.state != yard_core::api::JobState::Running {
+                break status;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        assert_eq!(status.state, yard_core::api::JobState::Done, "{}", status.message);
+        assert_eq!(status.design, None, "nothing was saved as a design");
+
+        // The page draws it from the file; a 5 by 5 by 5 box round its middle, with a block there too.
+        let (status, _, bytes) = send(&app, "GET", &format!("/api/jobs/{}/piece", started.job), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let piece = Blueprint::from_sment(&bytes).unwrap();
+        assert_eq!(piece.root.entity.block_count(), 125);
+        assert_eq!(piece.root.entity.bounds().map(|b| (b.min, b.max)), Some((Pos::new(-2, -2, -2), Pos::new(2, 2, 2))));
+        assert_ne!(piece.root.entity.get(Pos::new(0, 0, 0)).ty(), Catalog::CORE, "a piece has no core");
+
+        // Locked in with its middle at x = 3 it covers x = 1..5: the row's three
+        // blocks are there already, and the design's are kept.
+        let merge = format!(r#"{{"rev":{rev},"entity":"","piece":"{}","fit":{{"at":[3,0,0]}},"replace":false}}"#, started.job);
+        let (status, _, body) = send(&app, "POST", &format!("/api/designs/{}/merge", summary.id), Some(merge)).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let done: yard_core::api::MergeDone = serde_json::from_slice(&body).unwrap();
+        assert_eq!((done.kept_back, done.written), (3, 122));
+        let (bp, now) = download(&app, &summary.id).await;
+        assert_eq!(now, rev + 1);
+        assert_eq!(bp.root.entity.block_count(), 4 + 122, "the core and row, and the rest of the box");
+        assert_eq!(bp.root.entity.get(Pos::new(0, 0, 0)).ty(), Catalog::CORE);
+        // One step: Undo takes the whole piece back out.
+        let (status, _) = step(&app, &summary.id, now, vec![Op::Undo]).await;
+        assert_eq!(status, StatusCode::OK);
+        let (bp, _) = download(&app, &summary.id).await;
+        assert_eq!(bp.root.entity.block_count(), 4);
     }
 
     #[tokio::test]
@@ -1312,6 +2039,57 @@ mod tests {
         let (_, rev) = download(&app, &id).await;
         let (status, _, _) = post(format!("/api/designs/{id}/restore"), format!(r#"{{"rev":{rev}}}"#)).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn a_turret_of_another_design_is_docked_onto_this_one() {
+        let Some((app, _state, _cleanup)) = test_app("dock-from").await else { return };
+        let post = |uri: String, body: Option<String>| {
+            let app = app.clone();
+            async move { send(&app, "POST", &uri, body).await }
+        };
+        let slab = || Op::Fill { min: Pos::new(-6, -2, -6), max: Pos::new(6, -1, 6), block: Block::new(5, 0, false), mode: FillMode::Solid, when: When::Empty, link: None };
+        // The design with a turret on it.
+        let (_, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Gunship"}"#.into())).await;
+        let gunship = serde_json::from_slice::<Summary>(&body).unwrap().id;
+        let (_, rev) = download(&app, &gunship).await;
+        let block = Op::Fill { min: Pos::new(1, 0, 1), max: Pos::new(3, 2, 3), block: Block::new(5, 0, false), mode: FillMode::Solid, when: When::Empty, link: None };
+        assert_eq!(step(&app, &gunship, rev, vec![slab(), block]).await.0, StatusCode::OK);
+        let (_, rev) = download(&app, &gunship).await;
+        let (status, _, body) = post(format!("/api/designs/{gunship}/make-turret"), Some(format!(r#"{{"rev":{rev},"entity":"","min":[3,2,3],"max":[1,0,1],"base":3}}"#))).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        // The design to dock it onto.
+        let (_, _, body) = send(&app, "POST", "/api/designs/new", Some(r#"{"name":"Plain"}"#.into())).await;
+        let plain = serde_json::from_slice::<Summary>(&body).unwrap().id;
+        let (_, rev) = download(&app, &plain).await;
+        assert_eq!(step(&app, &plain, rev, vec![slab()]).await.0, StatusCode::OK);
+
+        let (status, _, body) = post(format!("/api/designs/{plain}/source?from={gunship}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let read: yard_core::api::SourceRead = serde_json::from_slice(&body).unwrap();
+        assert_eq!(read.name, "Gunship");
+        assert_eq!(read.dockable.len(), 1);
+        assert_eq!((read.dockable[0].path.as_str(), read.dockable[0].turret, read.dockable[0].blocks), ("ATTACHED_0", true, 27));
+        // The page gets just the turret to show it.
+        let (status, _, bytes) = send(&app, "GET", &format!("/api/jobs/{}/source?entity=ATTACHED_0", read.job), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let small = Blueprint::from_sment(&bytes).unwrap();
+        assert_eq!((small.root.entity.block_count(), small.root.children.len()), (0, 1));
+
+        let (_, rev) = download(&app, &plain).await;
+        let dock = format!(r#"{{"rev":{rev},"job":"{}","path":"ATTACHED_0","parent":"","at":[-3,-1,-3],"facing":[0,1,0]}}"#, read.job);
+        let (status, _, body) = post(format!("/api/designs/{plain}/dock-from"), Some(dock)).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let made: yard_core::api::Restructured = serde_json::from_slice(&body).unwrap();
+        assert_eq!(made.entity, "ATTACHED_0");
+        assert!(made.notes[0].contains("Gunship"), "{:?}", made.notes);
+        let (bp, _) = download(&app, &plain).await;
+        assert_eq!(bp.root.entity.get(Pos::new(-3, -1, -3)).ty(), yard_core::dock::TURRET_AXIS);
+        assert_eq!(bp.entity("ATTACHED_0").unwrap().entity.block_count(), 27);
+        assert_eq!(bp.docks().len(), 1);
+        // Its hull blocks can be taken as a piece from the same reading.
+        let (status, _, body) = post(format!("/api/designs/{plain}/piece-blueprint?job={}", read.job), None).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     }
 
     #[tokio::test]
@@ -1442,7 +2220,7 @@ mod tests {
     async fn the_assistant_builds_in_an_open_design_and_the_browser_can_follow() {
         use yard_agent::{Script, ScriptedProvider};
         let Some((app, state, _cleanup)) = test_app("assistant").await else { return };
-        let (status, _, body) = send(&app, "POST", "/api/designs/new", Some(serde_json::to_string(&NewDesign { name: "Chat ship".into() }).unwrap())).await;
+        let (status, _, body) = send(&app, "POST", "/api/designs/new", Some(serde_json::to_string(&NewDesign { name: "Chat ship".into(), station: false }).unwrap())).await;
         assert_eq!(status, StatusCode::OK);
         let id = serde_json::from_slice::<Summary>(&body).unwrap().id;
         // Without keys or a local server the picker says why it is short.
@@ -1498,7 +2276,7 @@ mod tests {
     async fn bad_names_and_unknown_designs_are_refused() {
         let Some((app, _, _cleanup)) = test_app("refuse").await else { return };
         for name in ["", "   ", "../../etc"] {
-            let body = serde_json::to_string(&NewDesign { name: name.into() }).unwrap();
+            let body = serde_json::to_string(&NewDesign { name: name.into(), station: false }).unwrap();
             let (status, _, _) = send(&app, "POST", "/api/designs/new", Some(body)).await;
             // Path characters are replaced, never passed through.
             if status == StatusCode::OK {

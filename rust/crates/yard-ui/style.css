@@ -282,3 +282,27 @@ table.links button { padding: 1px 8px; font-size: 12px; }
 button.danger { background: #5a2222; border-color: #a04444; color: #ffd6d6; }
 button.danger:hover { background: #7a2b2b; border-color: #ff8b8b; }
 .build .shift-help { margin-top: 10px; }
+
+/* Work the server is doing for the page: what, how far, and a way to stop it. */
+.job { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 40; width: min(460px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.job-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.job-line span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-line small { color: var(--dim); flex: 1; }
+.job-line .job-steps { margin-left: auto; color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+.job-track { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; position: relative; }
+.job-fill { height: 100%; background: var(--accent); transition: width 0.25s linear; }
+.job-track.unknown .job-fill { position: absolute; animation: job-slide 1.2s ease-in-out infinite; }
+@keyframes job-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .job-track.unknown .job-fill { animation: none; left: 0; width: 100% !important; opacity: 0.5; } }
+
+/* Placing a model in the design: where it is, moving and turning it, and locking it in. */
+.piece { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 35; width: min(560px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.piece-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.piece-row small { color: var(--dim); }
+.piece-label { color: var(--dim); font-size: 12px; width: 54px; flex: none; }
+.piece-at { width: 72px; }
+.piece .note { margin: 0; }
+.hidden { display: none !important; }
+.pick-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.pick-list button { width: 100%; text-align: left; }
+.pick-list button .empty { font-size: 12px; }

@@ -340,6 +340,15 @@ impl Renderer {
         }
     }
 
+    /// Takes every mesh of one group off the screen, leaving the others.
+    pub fn clear_group(&mut self, group: usize) {
+        let chunks = self.groups.get_mut(group).map(|g| std::mem::take(&mut g.chunks)).unwrap_or_default();
+        for (_, chunk) in chunks {
+            self.free(chunk.opaque);
+            self.free(chunk.translucent);
+        }
+    }
+
     pub fn clear_chunks(&mut self) {
         for group in std::mem::take(&mut self.groups) {
             for (_, chunk) in group.chunks {

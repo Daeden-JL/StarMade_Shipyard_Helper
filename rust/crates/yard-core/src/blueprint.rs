@@ -220,6 +220,19 @@ impl Blueprint {
         Self { name: name.to_string(), root, warnings: Vec::new(), converted: false }
     }
 
+    /// A new space station: just `first`, at its centre, where a ship has
+    /// its core. The game starts a station from a Build Block; the caller
+    /// passes that block, by the install's own numbering.
+    pub fn new_station(name: &str, game_version: &str, first: crate::Block) -> Self {
+        let mut bp = Self::new_ship(name, game_version);
+        let root = &mut bp.root;
+        root.entity.set(crate::Pos::new(0, 0, 0), first);
+        root.header.entity_type = crate::convert::STATION;
+        root.header.classification = crate::convert::class::NONE_STATION;
+        root.header.refresh(&root.entity);
+        bp
+    }
+
     /// Reads a `.sment` file as it is stored. Fine for anything saved by a
     /// current game; blueprints from older versions need [`Blueprint::from_sment_with`].
     pub fn from_sment(data: &[u8]) -> Result<Self> {
@@ -628,6 +641,22 @@ fn write_pos(w: &mut Writer, p: Pos) {
     w.i16((p.x + CORE_OFFSET) as i16);
     w.i16((p.y + CORE_OFFSET) as i16);
     w.i16((p.z + CORE_OFFSET) as i16);
+}
+
+/// The header of the main entity of a `.sment`, read without unpacking
+/// the rest: for listing what kind of entity a stored design is.
+pub fn header_of_sment(data: &[u8]) -> Result<Header> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(data)).map_err(|e| Error::NotABlueprint(format!("not a zip file ({e})")))?;
+    let name = archive
+        .file_names()
+        .filter(|n| n.replace('\\', "/").ends_with("header.smbph"))
+        .min_by_key(|n| n.replace('\\', "/").matches('/').count())
+        .map(str::to_string)
+        .ok_or_else(|| Error::NotABlueprint("no header.smbph inside".into()))?;
+    let mut file = archive.by_name(&name).map_err(|e| Error::Archive(e.to_string()))?;
+    let mut bytes = Vec::new();
+    file.by_ref().take(16 * 1024 * 1024).read_to_end(&mut bytes).map_err(|e| Error::Archive(e.to_string()))?;
+    Header::read(&bytes)
 }
 
 /// Unpacks a zip into a file tree, with a cap on total size so a small upload

@@ -585,6 +585,92 @@ pub fn notch_block(entity: &Entity, q: Pos, whole: impl Fn(Block) -> bool, resha
     reshape(beside, &form)
 }
 
+/// Where a long pass over an entity has got to, for a progress bar, and
+/// whether to carry on.
+pub trait Progress {
+    /// The pass is at step `stage` of its steps, doing `what`, and has done
+    /// `done` of `total` blocks of it (a total of 0: no telling how long).
+    /// Returns false to stop the pass.
+    fn report(&self, stage: Stage, what: &str, done: u64, total: u64) -> bool;
+}
+
+/// Which of the steps of a long pass is under way: the `number`th of `of`,
+/// counting from 1. A step that repeats until nothing changes (cutting the
+/// ends of rows) counts once, its rounds told apart in its words.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stage {
+    pub number: u32,
+    pub of: u32,
+}
+
+impl<F: Fn(Stage, &str, u64, u64) -> bool> Progress for F {
+    fn report(&self, stage: Stage, what: &str, done: u64, total: u64) -> bool {
+        self(stage, what, done, total)
+    }
+}
+
+/// How many steps a smoothing pass with these options goes through.
+pub fn smooth_stages(opts: &Smoothing) -> u32 {
+    if opts.step == 0 {
+        return 0;
+    }
+    // The open air, the bevels, the ends of rows and the inside corners;
+    // the notches first with `inside`, the sharpening with `sharpen`.
+    4 + u32::from(opts.inside) + u32::from(opts.sharpen)
+}
+
+/// How many steps smoothing again from scratch goes through: the shaped
+/// blocks made whole, the notch wedges found, then the pass.
+pub fn resmooth_stages(opts: &Smoothing) -> u32 {
+    2 + smooth_stages(opts)
+}
+
+/// Progress nobody watches: the pass always runs to the end.
+pub struct Quiet;
+
+impl Progress for Quiet {
+    fn report(&self, _: Stage, _: &str, _: u64, _: u64) -> bool {
+        true
+    }
+}
+
+/// Counts the blocks one sweep has looked at and passes the count on now
+/// and then; once told to stop, every later block is passed over.
+struct Ticker<'a> {
+    progress: &'a dyn Progress,
+    stage: Stage,
+    what: String,
+    total: u64,
+    done: std::cell::Cell<u64>,
+    stopped: &'a std::cell::Cell<bool>,
+}
+
+impl<'a> Ticker<'a> {
+    const EVERY: u64 = 8192;
+
+    fn new(progress: &'a dyn Progress, stopped: &'a std::cell::Cell<bool>, stage: Stage, what: impl Into<String>, total: u64) -> Self {
+        let ticker = Ticker { progress, stage, what: what.into(), total, done: std::cell::Cell::new(0), stopped };
+        if !stopped.get() && !progress.report(stage, &ticker.what, 0, total) {
+            stopped.set(true);
+        }
+        ticker
+    }
+
+    /// One more block; false once the pass is to stop.
+    fn tick(&self) -> bool {
+        if self.stopped.get() {
+            return false;
+        }
+        let n = self.done.get() + 1;
+        self.done.set(n);
+        if n.is_multiple_of(Self::EVERY) && !self.progress.report(self.stage, &self.what, n, self.total) {
+            self.stopped.set(true);
+            return false;
+        }
+        true
+    }
+}
+
 /// One pass of smoothing over a whole entity: the edges of steps up to `step`
 /// high beveled (wedges, and corner pieces where two meet), then the inside
 /// corners where beveled rows meet (heptas). Only blocks `whole` accepts
@@ -617,14 +703,28 @@ pub fn smooth_entity_opts(
     reshape: impl Fn(Block, &Form) -> Option<Block>,
     samples: impl Fn(Block) -> Option<u64>,
 ) -> Vec<(Pos, Block)> {
+    smooth_entity_progress(entity, opts, whole, reshape, samples, &Quiet).unwrap_or_default()
+}
+
+/// [`smooth_entity_opts`], telling `progress` how far it has got. None if
+/// `progress` stopped it.
+pub fn smooth_entity_progress(
+    entity: &Entity,
+    opts: &Smoothing,
+    whole: impl Fn(Block) -> bool,
+    reshape: impl Fn(Block, &Form) -> Option<Block>,
+    samples: impl Fn(Block) -> Option<u64>,
+    progress: &dyn Progress,
+) -> Option<Vec<(Pos, Block)>> {
     if opts.step == 0 {
-        return Vec::new();
+        return Some(Vec::new());
     }
-    smooth_sealed(entity, &HashSet::new(), opts, whole, reshape, samples)
+    smooth_sealed(entity, &HashSet::new(), opts, whole, reshape, samples, progress, Stage { number: 1, of: smooth_stages(opts) })
 }
 
 /// [`smooth_entity`], with the empty cells `sealed` counted as blocks in
 /// working out the open air (and only there).
+#[allow(clippy::too_many_arguments)]
 fn smooth_sealed(
     entity: &Entity,
     sealed: &HashSet<Pos>,
@@ -632,15 +732,27 @@ fn smooth_sealed(
     whole: impl Fn(Block) -> bool,
     reshape: impl Fn(Block, &Form) -> Option<Block>,
     samples: impl Fn(Block) -> Option<u64>,
-) -> Vec<(Pos, Block)> {
+    progress: &dyn Progress,
+    first: Stage,
+) -> Option<Vec<(Pos, Block)>> {
     let (step, inside) = (opts.step, opts.inside);
+    // Each step a number of its own, from `first` on.
+    let next = std::cell::Cell::new(first.number);
+    let stage = || {
+        let number = next.get();
+        next.set(number + 1);
+        Stage { number, of: first.of }
+    };
+    let total = entity.block_count();
+    let stopped = std::cell::Cell::new(false);
     let at = |p: Pos, d: [i32; 3]| Pos::new(p.x + d[0], p.y + d[1], p.z + d[2]);
     // The inner face of a staircase one block thick: its notches filled. The
     // open air is what it is once they are, so a second pass sees the same.
     let mut filled: HashMap<Pos, Block> = HashMap::new();
     if inside {
+        let t = Ticker::new(progress, &stopped, stage(), "Filling the notches of thin hulls", total);
         entity.for_each(|p, b| {
-            if !whole(b) {
+            if !t.tick() || !whole(b) {
                 return;
             }
             for d in SIDE_DIRS {
@@ -656,6 +768,10 @@ fn smooth_sealed(
     }
     let mut closed = sealed.clone();
     closed.extend(filled.keys().copied());
+    Ticker::new(progress, &stopped, stage(), "Finding the open air around the hull", 0);
+    if stopped.get() {
+        return None;
+    }
     let outside = Outside::of_with(entity, &closed);
     let air_of = |p: Pos| -> u8 {
         let (mut open, mut any) = (0u8, 0u8);
@@ -669,8 +785,9 @@ fn smooth_sealed(
         outer_first(open, any, inside)
     };
     let mut planned: HashMap<Pos, Block> = HashMap::new();
+    let t = Ticker::new(progress, &stopped, stage(), "Bevelling the edges of steps", total);
     entity.for_each(|p, b| {
-        if !whole(b) {
+        if !t.tick() || !whole(b) {
             return;
         }
         let air = air_of(p);
@@ -689,9 +806,16 @@ fn smooth_sealed(
     // round at a time until nothing changes, since a block cut flush can be
     // what the next one along is to be flush with.
     let whole_form = forms()[0];
+    let rows = stage();
+    let mut round = 0;
     loop {
+        round += 1;
         let mut ends = Vec::new();
+        let t = Ticker::new(progress, &stopped, rows, format!("Cutting the ends of rows flush (round {round})"), total);
         entity.for_each(|p, b| {
+            if !t.tick() {
+                return;
+            }
             let fresh = planned.contains_key(&p);
             if !fresh && (whole(b) || !reshape(b, &whole_form).is_some_and(&whole)) {
                 return;
@@ -712,6 +836,9 @@ fn smooth_sealed(
                 ends.push((p, new));
             }
         });
+        if stopped.get() {
+            return None;
+        }
         if ends.is_empty() {
             break;
         }
@@ -720,10 +847,14 @@ fn smooth_sealed(
     // Slopes carried on through the whole blocks they end against, and on
     // along the edge: a round at a time, each seeing what the last made.
     if opts.sharpen {
+        let sharpening = stage();
+        let mut round = 0;
         loop {
+            round += 1;
             let mut more = Vec::new();
+            let t = Ticker::new(progress, &stopped, sharpening, format!("Sharpening edges (round {round})"), total);
             entity.for_each(|p, b| {
-                if !whole(b) || planned.contains_key(&p) {
+                if !t.tick() || !whole(b) || planned.contains_key(&p) {
                     return;
                 }
                 let air = air_of(p);
@@ -737,6 +868,9 @@ fn smooth_sealed(
                     more.push((p, new));
                 }
             });
+            if stopped.get() {
+                return None;
+            }
             if more.is_empty() {
                 break;
             }
@@ -744,8 +878,9 @@ fn smooth_sealed(
         }
     }
     let mut corners = Vec::new();
+    let t = Ticker::new(progress, &stopped, stage(), "Taking off inside corners", total);
     entity.for_each(|p, b| {
-        if !whole(b) || planned.contains_key(&p) {
+        if !t.tick() || !whole(b) || planned.contains_key(&p) {
             return;
         }
         let air = air_of(p);
@@ -763,8 +898,11 @@ fn smooth_sealed(
     let mut out: Vec<(Pos, Block)> = planned.into_iter().collect();
     out.extend(corners);
     out.extend(filled);
+    if stopped.get() {
+        return None;
+    }
     out.sort_by_key(|(p, _)| (p.z, p.y, p.x));
-    out
+    Some(out)
 }
 
 /// Smoothing done over from the start, for a design smoothed before (an
@@ -800,13 +938,34 @@ pub fn resmooth_entity_opts(
     samples: impl Fn(Block) -> Option<u64>,
     unshape: impl Fn(Block) -> Option<Block>,
 ) -> Vec<(Pos, Block)> {
+    resmooth_entity_progress(entity, opts, whole, reshape, samples, unshape, &Quiet).unwrap_or_default()
+}
+
+/// [`resmooth_entity_opts`], telling `progress` how far it has got. None if
+/// `progress` stopped it.
+#[allow(clippy::too_many_arguments)]
+pub fn resmooth_entity_progress(
+    entity: &Entity,
+    opts: &Smoothing,
+    whole: impl Fn(Block) -> bool,
+    reshape: impl Fn(Block, &Form) -> Option<Block>,
+    samples: impl Fn(Block) -> Option<u64>,
+    unshape: impl Fn(Block) -> Option<Block>,
+    progress: &dyn Progress,
+) -> Option<Vec<(Pos, Block)>> {
+    let stopped = std::cell::Cell::new(false);
+    let of = resmooth_stages(opts);
     let mut flat = Entity::new();
     for (key, segment) in entity.segments() {
         let copy = crate::entity::Segment { blocks: segment.blocks.clone(), count: segment.count, version: segment.version, timestamp: segment.timestamp };
         flat.insert_segment(*key, copy);
     }
     let mut shaped: Vec<(Pos, Block, Block)> = Vec::new();
+    let t = Ticker::new(progress, &stopped, Stage { number: 1, of }, "Turning shaped blocks back into whole ones", entity.block_count());
     entity.for_each(|p, b| {
+        if !t.tick() {
+            return;
+        }
         if let Some(cube) = unshape(b).filter(|c| *c != b) {
             shaped.push((p, b, cube));
         }
@@ -817,8 +976,15 @@ pub fn resmooth_entity_opts(
     // A notch's wedge is the one smoothing would put in the cell were it
     // empty, judged with the other notches empty as they were when it was put
     // there: found a round at a time until no more are.
+    if stopped.get() {
+        return None;
+    }
     let mut notches = Vec::new();
     loop {
+        Ticker::new(progress, &stopped, Stage { number: 2, of }, "Finding the wedges in the notches of thin hulls", 0);
+        if stopped.get() {
+            return None;
+        }
         let found: Vec<_>;
         (found, shaped) = shaped.into_iter().partition(|(p, b, _)| notch_block(&flat, *p, &whole, &reshape) == Some(*b));
         if found.is_empty() {
@@ -830,7 +996,7 @@ pub fn resmooth_entity_opts(
         notches.extend(found);
     }
     let sealed: HashSet<Pos> = notches.iter().map(|(p, _, _)| *p).collect();
-    let mut done: HashMap<Pos, Block> = if opts.step == 0 { HashMap::new() } else { smooth_sealed(&flat, &sealed, opts, &whole, &reshape, &samples).into_iter().collect() };
+    let mut done: HashMap<Pos, Block> = if opts.step == 0 { HashMap::new() } else { smooth_sealed(&flat, &sealed, opts, &whole, &reshape, &samples, progress, Stage { number: 3, of })?.into_iter().collect() };
     for (p, b, _) in notches {
         flat.set(p, b);
         done.remove(&p);
@@ -845,7 +1011,75 @@ pub fn resmooth_entity_opts(
         })
         .collect();
     out.sort_by_key(|(p, _)| (p.z, p.y, p.x));
-    out
+    Some(out)
+}
+
+
+/// What smoothing needs to know of the game's blocks: which shape of which
+/// material each block type is, and which type gives a material a shape.
+/// The server builds it from the block list; the browser has its own copy
+/// of the same rules, so both smooth alike.
+#[derive(Clone, Debug, Default)]
+pub struct Shaper {
+    /// Per block type: its material (the plain full block it is a shape or
+    /// slab of), its shape and slab, and whether it has a distinct front.
+    kinds: HashMap<u16, (u16, Shape, u8, bool)>,
+    /// The block type of each shape and slab of a material.
+    variants: HashMap<(u16, Shape, u8), u16>,
+}
+
+impl Shaper {
+    /// Adds a block type of the game's list. `base` is the full block it is
+    /// a shape of (0 for a full block); `sides` how many sides have their
+    /// own texture.
+    pub fn add(&mut self, id: u16, shape: Shape, slab: u8, base: u16, sides: u8) {
+        let base = if base != 0 { base } else { id };
+        let faces_matter = shape == Shape::Cube && (slab > 0 || sides == 6);
+        self.kinds.insert(id, (base, shape, slab, faces_matter));
+        self.variants.insert((base, shape, slab), id);
+    }
+
+    /// Whether smoothing may reshape a block: a whole cube of a material
+    /// with no front of its own, and never the core.
+    pub fn whole(&self, b: Block) -> bool {
+        b.ty() != crate::edit::CORE_TYPE && matches!(self.kinds.get(&b.ty()), Some((_, Shape::Cube, 0, false)))
+    }
+
+    /// The block of the same material in another shape, turned as asked.
+    pub fn reshape(&self, b: Block, form: &Form) -> Option<Block> {
+        let (base, _, _, _) = self.kinds.get(&b.ty())?;
+        let ty = *self.variants.get(&(*base, form.shape, form.slab))?;
+        let mut out = b;
+        out.set_type(ty);
+        out.set_orientation(form.orientation);
+        Some(out)
+    }
+
+    /// The sample points a block fills: nothing for air, all for a whole block.
+    pub fn samples(&self, b: Block) -> Option<u64> {
+        if b.is_air() {
+            return None;
+        }
+        Some(match self.kinds.get(&b.ty()) {
+            Some((_, shape @ (Shape::Wedge | Shape::Corner | Shape::Tetra | Shape::Hepta), _, _)) => samples_of(*shape, 0, b.orientation()),
+            Some((_, Shape::Cube, slab, _)) if *slab > 0 => samples_of(Shape::Cube, *slab, b.orientation()),
+            _ => u64::MAX,
+        })
+    }
+
+    /// The whole block of a wedge, corner, hepta or tetra, for smoothing
+    /// again from scratch. None for any other block.
+    pub fn unshape(&self, b: Block) -> Option<Block> {
+        let (base, shape, _, _) = self.kinds.get(&b.ty())?;
+        if !matches!(shape, Shape::Wedge | Shape::Corner | Shape::Tetra | Shape::Hepta) {
+            return None;
+        }
+        let ty = *self.variants.get(&(*base, Shape::Cube, 0))?;
+        let mut out = b;
+        out.set_type(ty);
+        out.set_orientation(0);
+        Some(out).filter(|c| self.whole(*c))
+    }
 }
 
 #[cfg(test)]
@@ -1256,6 +1490,44 @@ mod tests {
         let (top, under) = (count(1), count(-1));
         assert!(top[2] > 0, "the inside corner on top is a hepta: {top:?}");
         assert_eq!(under, top, "wedges, corners, heptas, tetras");
+    }
+
+    #[test]
+    fn a_pass_reports_how_far_it_has_got_and_stops_when_told() {
+        // A slab 100 by 100 with a step on it, big enough for a report mid-sweep.
+        let mut e = Entity::new();
+        for x in -50i32..50 {
+            for z in -50i32..50 {
+                for y in 0..=i32::from(x > 0) {
+                    e.set(Pos::new(x, y, z), Block::new(5, 0, false));
+                }
+            }
+        }
+        let opts = Smoothing { step: 1, inside: false, sharpen: false };
+        let seen = std::cell::RefCell::new(Vec::new());
+        let watch = |stage: Stage, what: &str, done: u64, total: u64| {
+            seen.borrow_mut().push((stage, what.to_string(), done, total));
+            true
+        };
+        let full = smooth_entity_progress(&e, &opts, |b| b.ty() == 5, reshape_test, samples_test, &watch).unwrap();
+        assert_eq!(full, smooth_entity(&e, 1, |b| b.ty() == 5, reshape_test, samples_test, false), "watching changes nothing");
+        let seen = seen.into_inner();
+        assert!(seen.iter().any(|(_, what, done, total)| what.starts_with("Bevelling") && *done > 0 && done <= total), "{seen:?}");
+        // The steps count up from 1 to as many as there are, never past.
+        let numbers: Vec<u32> = seen.iter().map(|(stage, ..)| stage.number).collect();
+        assert_eq!(seen.iter().map(|(stage, ..)| stage.of).collect::<std::collections::BTreeSet<_>>(), [smooth_stages(&opts)].into());
+        assert!(numbers.windows(2).all(|w| w[0] <= w[1]), "{numbers:?}");
+        assert_eq!((numbers.first(), numbers.last()), (Some(&1), Some(&smooth_stages(&opts))));
+        // Told to stop part way: no result at all.
+        let calls = std::cell::Cell::new(0);
+        let stop = |_: Stage, _: &str, _: u64, _: u64| {
+            calls.set(calls.get() + 1);
+            calls.get() < 3
+        };
+        assert_eq!(smooth_entity_progress(&e, &opts, |b| b.ty() == 5, reshape_test, samples_test, &stop), None);
+        let again = smooth_entity(&e, 1, |b| b.ty() == 5, reshape_test, samples_test, false);
+        assert_eq!(resmooth_entity_progress(&e, &opts, |b| b.ty() == 5, reshape_test, samples_test, |_| None, &|_: Stage, _: &str, _, _| false), None);
+        assert!(!again.is_empty());
     }
 
     #[test]

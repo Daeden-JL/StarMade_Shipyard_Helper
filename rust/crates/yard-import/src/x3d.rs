@@ -1,6 +1,6 @@
 //! X3D (XML) and its forerunner VRML 2.0 (text): only the faces of
-//! `IndexedFaceSet` and its triangle cousins, with their transforms and
-//! plain colours.
+//! `IndexedFaceSet` and its triangle cousins, with their transforms, plain
+//! colours and image textures (pictures found beside the file in a zip).
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -41,6 +41,13 @@ impl Node {
         self.fields.iter().any(|(n, f)| n == name && matches!(f, Field::Text(t) if t.eq_ignore_ascii_case("false")))
     }
 
+    fn text(&self, name: &str) -> Option<&str> {
+        self.fields.iter().find_map(|(n, f)| match f {
+            Field::Text(text) if n == name => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
     fn nodes(&self) -> impl Iterator<Item = &Rc<Node>> {
         self.fields.iter().filter_map(|(_, f)| match f {
             Field::Nodes(nodes) => Some(nodes.iter()),
@@ -58,7 +65,7 @@ pub(crate) fn read(source: Source) -> Result<Model> {
     let doc = crate::xml::parse(&content, "X3D")?;
     let mut named = HashMap::new();
     let root = from_xml(doc.root_element(), &mut named, 0)?;
-    build("X3D", &root)
+    build("X3D", &root, &source)
 }
 
 fn from_xml(element: roxmltree::Node, named: &mut HashMap<String, Rc<Node>>, depth: usize) -> Result<Rc<Node>> {
@@ -110,7 +117,8 @@ pub(crate) fn read_vrml(source: Source) -> Result<Model> {
             _ => drop(lexer.next()),
         }
     }
-    build("VRML", &Node { kind: "Scene".into(), fields: vec![("children".into(), Field::Nodes(top))] })
+    let scene = Node { kind: "Scene".into(), fields: vec![("children".into(), Field::Nodes(top))] };
+    build("VRML", &scene, &source)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -284,7 +292,7 @@ impl Lexer<'_> {
                     } else if !numbers.is_empty() {
                         Field::Numbers(numbers)
                     } else {
-                        Field::Text(texts.join(" "))
+                        Field::Text(texts.join("\n"))
                     }
                 }
                 _ if self.at_node() => Field::Nodes(self.node(named, depth + 1)?.into_iter().collect()),
@@ -300,17 +308,18 @@ impl Lexer<'_> {
     }
 }
 
-fn build(format: &'static str, root: &Node) -> Result<Model> {
+fn build(format: &'static str, root: &Node, source: &Source) -> Result<Model> {
     let mut model = Model::new(format, Up::Y);
     let (mut visits, mut shapes) = (0, 0);
-    walk(&mut model, root, &Mat4::SAME, Skin::None, 0, &mut visits, &mut shapes)?;
+    walk(&mut model, source, root, &Mat4::SAME, Skin::None, 0, &mut visits, &mut shapes)?;
     if shapes > 1 {
         model.note(format!("{shapes} objects were merged."));
     }
     model.finish()
 }
 
-fn walk(model: &mut Model, node: &Node, placed: &Mat4, skin: Skin, depth: usize, visits: &mut usize, shapes: &mut usize) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn walk(model: &mut Model, source: &Source, node: &Node, placed: &Mat4, skin: Skin, depth: usize, visits: &mut usize, shapes: &mut usize) -> Result<()> {
     *visits += 1;
     if depth > MAX_DEPTH || *visits > MAX_VISITS {
         return Ok(());
@@ -320,23 +329,40 @@ fn walk(model: &mut Model, node: &Node, placed: &Mat4, skin: Skin, depth: usize,
         "Transform" => placed = placed.times(&transform(node)),
         "Shape" => {
             *shapes += 1;
-            let colour = node.find(&["Appearance"]).and_then(|a| a.find(&["Material"])).map(|m| m.numbers("diffuseColor")).filter(|c| c.len() >= 3);
+            let appearance = node.find(&["Appearance"]);
+            let colour = appearance.and_then(|a| a.find(&["Material"])).map(|m| m.numbers("diffuseColor")).filter(|c| c.len() >= 3);
             skin = colour.map_or(Skin::None, |c| Skin::Flat([byte(c[0] as f32), byte(c[1] as f32), byte(c[2] as f32)]));
+            if let Some(picture) = appearance.and_then(|a| a.find(&["ImageTexture"])) {
+                // The picture's colour takes the place of the material's.
+                match urls(picture).find_map(|url| model.texture(&url, source.companion(&url))) {
+                    Some(texture) => skin = Skin::Texture { texture, tint: [255; 3] },
+                    None => model.note("Textures were not found in the upload; material colours were used."),
+                }
+            }
         }
         "IndexedFaceSet" | "IndexedTriangleSet" | "TriangleSet" => return faces(model, node, &placed, skin),
         // Of the same thing at several levels of detail, the finest.
         "LOD" => {
             return match node.nodes().next() {
-                Some(finest) => walk(model, finest, &placed, skin, depth + 1, visits, shapes),
+                Some(finest) => walk(model, source, finest, &placed, skin, depth + 1, visits, shapes),
                 None => Ok(()),
             };
         }
         _ => {}
     }
     for child in node.nodes() {
-        walk(model, child, &placed, skin, depth + 1, visits, shapes)?;
+        walk(model, source, child, &placed, skin, depth + 1, visits, shapes)?;
     }
     Ok(())
+}
+
+/// The names an ImageTexture gives for its picture, best first: VRML hands
+/// them over one per line, X3D as quoted words in one attribute.
+fn urls(node: &Node) -> impl Iterator<Item = String> + '_ {
+    let text = node.text("url").unwrap_or_default();
+    let quoted: Vec<String> = text.split('"').skip(1).step_by(2).map(str::to_string).collect();
+    let names = if quoted.is_empty() { text.lines().map(str::to_string).collect() } else { quoted };
+    names.into_iter().map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
 }
 
 /// A Transform node's placing: shift, then turn and stretch about a centre.
@@ -379,6 +405,11 @@ fn faces(model: &mut Model, node: &Node, placed: &Mat4, skin: Skin) -> Result<()
         _ => (0..points.len() as i64 / 3).flat_map(|t| [t * 3, t * 3 + 1, t * 3 + 2, -1]).collect(),
     };
     let listed = node.kind == "IndexedFaceSet" && !colour_order.is_empty();
+    // Where each corner lies on the picture; the format counts up from the
+    // bottom, the textures down from the top.
+    let places: Vec<[f32; 2]> = node.find(&["TextureCoordinate"]).map(|t| t.numbers("point").chunks_exact(2).map(|p| [p[0] as f32, 1.0 - p[1] as f32]).collect()).unwrap_or_default();
+    let place_order = node.numbers("texCoordIndex");
+    let places_listed = node.kind == "IndexedFaceSet" && !place_order.is_empty();
     let mut corners: Vec<Corner> = Vec::new();
     let (mut whole, mut face) = (true, 0usize);
     for (nth, &index) in order.iter().chain(std::iter::once(&-1)).enumerate() {
@@ -403,7 +434,11 @@ fn faces(model: &mut Model, node: &Node, placed: &Mat4, skin: Skin) -> Result<()
         };
         let colour = which.and_then(|c| usize::try_from(c).ok()).and_then(|c| colours.get(c).copied());
         match points.get(index as usize) {
-            Some(at) => corners.push(Corner { at: *at, colour, uv: None }),
+            Some(at) => {
+                let place = if places_listed { place_order.get(nth).map(|&p| p as i64) } else { Some(index) };
+                let uv = place.and_then(|p| usize::try_from(p).ok()).and_then(|p| places.get(p).copied());
+                corners.push(Corner { at: *at, colour, uv });
+            }
             None => whole = false,
         }
     }

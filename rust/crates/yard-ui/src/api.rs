@@ -64,9 +64,9 @@ pub async fn upload(file_name: &str, bytes: &[u8]) -> Result<Summary, String> {
     check(res).await?.json().await.map_err(|e| e.to_string())
 }
 
-pub async fn new_design(name: &str) -> Result<Summary, String> {
+pub async fn new_design(name: &str, station: bool) -> Result<Summary, String> {
     let res = Request::post("/api/designs/new")
-        .json(&NewDesign { name: name.to_string() })
+        .json(&NewDesign { name: name.to_string(), station })
         .map_err(|e| e.to_string())?
         .send()
         .await
@@ -205,14 +205,17 @@ pub struct ImportChoices {
     pub smooth: bool,
     /// How tall a step the edges of are beveled, in blocks; 0 for none.
     pub step: u8,
+    /// Make a station of it instead of a ship.
+    pub station: bool,
 }
 
-/// Turns a 3D model file into a new ship on the server.
-pub async fn import_model(file_name: &str, bytes: &[u8], choices: &ImportChoices) -> Result<yard_core::api::ImportResult, String> {
+/// Starts turning a 3D model file into a new design on the server; follow
+/// it with [`job_status`], which names the design once it is done.
+pub async fn start_import(file_name: &str, bytes: &[u8], choices: &ImportChoices) -> Result<yard_core::api::JobStarted, String> {
     let name = js_sys::encode_uri_component(file_name);
     let uri = format!(
-        "/api/designs/import?name={name}&longest={}&solid={}&shell={}&up={}&turn={}&mirror={}&smooth={}&step={}",
-        choices.longest, choices.solid, choices.shell, choices.up, choices.turn, choices.mirror, choices.smooth, choices.step
+        "/api/designs/import-job?name={name}&longest={}&solid={}&shell={}&up={}&turn={}&mirror={}&smooth={}&step={}&station={}",
+        choices.longest, choices.solid, choices.shell, choices.up, choices.turn, choices.mirror, choices.smooth, choices.step, choices.station
     );
     let res = Request::post(&uri)
         .header("Content-Type", "application/octet-stream")
@@ -278,6 +281,12 @@ pub async fn delete_design(id: &str) -> Result<(), String> {
 /// behind the server's, it fails as out of step: the design has to be loaded
 /// again before the change can be asked for.
 async fn post_structure<B: serde::Serialize>(uri: &str, body: &B) -> Result<yard_core::api::Restructured, StepFailure> {
+    post_at_rev(uri, body).await
+}
+
+/// Sends a request made at a revision of the design: a 409 means this
+/// page is behind the server and has to load the design again.
+async fn post_at_rev<B: serde::Serialize, T: serde::de::DeserializeOwned>(uri: &str, body: &B) -> Result<T, StepFailure> {
     let refused = |e: String| StepFailure::Refused(e);
     let res = Request::post(uri).json(body).map_err(|e| refused(e.to_string()))?.send().await.map_err(|e| refused(unreachable_server(e)))?;
     let behind = res.status() == 409;
@@ -294,6 +303,94 @@ async fn post_structure<B: serde::Serialize>(uri: &str, body: &B) -> Result<yard
 pub async fn relocate_core(id: &str, rev: u64, entity: &str, to: [i32; 3], facing: Option<([i32; 3], [i32; 3])>, dock_follows: bool) -> Result<yard_core::api::Restructured, StepFailure> {
     let (forward, up) = (facing.map(|f| f.0), facing.map(|f| f.1));
     post_structure(&format!("/api/designs/{id}/relocate-core"), &yard_core::api::RelocateRequest { rev, entity: entity.to_string(), to, forward, up, dock_follows }).await
+}
+
+/// Starts a smoothing pass over a whole entity on the server; follow it with [`job_status`].
+pub async fn start_smoothing(id: &str, request: &yard_core::api::SmoothRequest) -> Result<yard_core::api::JobStarted, StepFailure> {
+    post_at_rev(&format!("/api/designs/{id}/smooth"), request).await
+}
+
+/// How a piece of work the server is doing is going.
+pub async fn job_status(job: &str) -> Result<yard_core::api::JobStatus, String> {
+    let res = check(Request::get(&format!("/api/jobs/{job}")).send().await.map_err(unreachable_server)?).await?;
+    res.json().await.map_err(|e| e.to_string())
+}
+
+/// Asks the server to stop a piece of work.
+pub async fn stop_job(job: &str) -> Result<(), String> {
+    check(Request::post(&format!("/api/jobs/{job}/stop")).send().await.map_err(unreachable_server)?).await.map(|_| ())
+}
+
+/// Starts cutting a 3D model into a piece to place in the design; follow it with [`job_status`].
+pub async fn start_piece(id: &str, file_name: &str, bytes: &[u8], choices: &ImportChoices) -> Result<yard_core::api::JobStarted, String> {
+    let name = js_sys::encode_uri_component(file_name);
+    let uri = format!(
+        "/api/designs/{id}/piece-job?name={name}&longest={}&solid={}&shell={}&up={}&turn={}&mirror={}&smooth={}&step={}",
+        choices.longest, choices.solid, choices.shell, choices.up, choices.turn, choices.mirror, choices.smooth, choices.step
+    );
+    let res = Request::post(&uri)
+        .header("Content-Type", "application/octet-stream")
+        .body(js_sys::Uint8Array::from(bytes))
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(unreachable_server)?;
+    check(res).await?.json().await.map_err(|e| e.to_string())
+}
+
+/// Reads an uploaded blueprint to take something from (see [`SourceRead`](yard_core::api::SourceRead)).
+pub async fn read_source_file(id: &str, file_name: &str, bytes: &[u8]) -> Result<yard_core::api::SourceRead, String> {
+    let name = js_sys::encode_uri_component(file_name);
+    let res = Request::post(&format!("/api/designs/{id}/source?name={name}"))
+        .header("Content-Type", "application/octet-stream")
+        .body(js_sys::Uint8Array::from(bytes))
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(unreachable_server)?;
+    check(res).await?.json().await.map_err(|e| e.to_string())
+}
+
+/// Reads another saved design to take something from.
+pub async fn read_source_design(id: &str, from: &str) -> Result<yard_core::api::SourceRead, String> {
+    let res = Request::post(&format!("/api/designs/{id}/source?from={}", js_sys::encode_uri_component(from))).send().await.map_err(unreachable_server)?;
+    check(res).await?.json().await.map_err(|e| e.to_string())
+}
+
+/// Takes the hull blocks of a blueprint read before as a piece to place;
+/// the job is done at once, and the piece fetched with [`piece`].
+pub async fn piece_from_source(id: &str, job: &str) -> Result<yard_core::api::JobStarted, String> {
+    let res = Request::post(&format!("/api/designs/{id}/piece-blueprint?job={}", js_sys::encode_uri_component(job))).send().await.map_err(unreachable_server)?;
+    check(res).await?.json().await.map_err(|e| e.to_string())
+}
+
+/// A blueprint read before, cut down to the entity at `entity`, to show it docked.
+pub async fn source_blueprint(job: &str, entity: &str) -> Result<yard_core::Blueprint, String> {
+    let res = check(Request::get(&format!("/api/jobs/{job}/source?entity={}", js_sys::encode_uri_component(entity))).send().await.map_err(unreachable_server)?).await?;
+    let bytes = res.binary().await.map_err(|e| e.to_string())?;
+    yard_core::Blueprint::from_sment(&bytes).map_err(|e| format!("The blueprint could not be read ({e})."))
+}
+
+/// Docks an entity of a blueprint read before into the design.
+pub async fn dock_from(id: &str, request: &yard_core::api::DockFromRequest) -> Result<yard_core::api::Restructured, StepFailure> {
+    post_structure(&format!("/api/designs/{id}/dock-from"), request).await
+}
+
+/// The piece a job made, as a blueprint.
+pub async fn piece(job: &str) -> Result<yard_core::Blueprint, String> {
+    let res = check(Request::get(&format!("/api/jobs/{job}/piece")).send().await.map_err(unreachable_server)?).await?;
+    let bytes = res.binary().await.map_err(|e| e.to_string())?;
+    yard_core::Blueprint::from_sment(&bytes).map_err(|e| format!("The piece could not be read ({e})."))
+}
+
+/// Locks a piece into an entity of the design where it was placed.
+pub async fn merge_piece(id: &str, request: &yard_core::api::MergeRequest) -> Result<yard_core::api::MergeDone, StepFailure> {
+    post_at_rev(&format!("/api/designs/{id}/merge"), request).await
+}
+
+/// Turns the design into a ship or a station (`to` is "ship" or "station").
+pub async fn convert_design(id: &str, rev: u64, to: &str) -> Result<yard_core::api::Restructured, StepFailure> {
+    post_structure(&format!("/api/designs/{id}/convert"), &yard_core::api::ConvertRequest { rev, to: to.to_string() }).await
 }
 
 /// Moves the rail a docked entity hangs from, by a cell given in `entity`'s coordinates (see `MoveRailRequest`).

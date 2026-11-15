@@ -95,6 +95,47 @@ pub const MAX_BRUSH: i32 = 32;
 
 /// What the mouse does on the viewport. Chosen in the build panel or with a
 /// key, and kept until another is chosen: nothing else switches it.
+/// The viewport group that draws a piece being placed: past any docked entity's.
+const PIECE_GROUP: usize = 4096;
+
+/// What a piece to place is made from.
+pub enum PieceFrom {
+    /// A 3D model, cut into blocks as the import dialog chose.
+    Model { name: String, bytes: Vec<u8>, choices: api::ImportChoices },
+    /// The main entity of a blueprint or design read before, kept by the job named.
+    Source(String),
+}
+
+/// A piece made from a 3D model, waiting to be locked into an entity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Placing {
+    /// The job on the server that made it and keeps it.
+    pub job: String,
+    /// The design and entity it goes into.
+    pub design: String,
+    pub entity: String,
+    pub blocks: u64,
+    pub fit: yard_core::merge::Fit,
+    /// Where it overlaps the design, its blocks win.
+    pub replace: bool,
+    /// How far one press moves it, in blocks.
+    pub step: i32,
+}
+
+/// How often the page asks how long work on the server is going, in milliseconds.
+const JOB_POLL_MS: i32 = 300;
+
+/// Work the server is doing for the page, as the progress bar shows it.
+#[derive(Clone, Debug)]
+pub struct JobView {
+    /// What it is, in words: "Smoothing".
+    pub title: String,
+    /// The server's name for it, once it has started.
+    pub id: Option<String>,
+    /// How it was going when last asked.
+    pub status: Option<yard_core::api::JobStatus>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
     /// Click a block to make it the selected block. Changes nothing in the design.
@@ -447,6 +488,8 @@ impl Tool {
 /// Everything that is not shown through a signal.
 #[derive(Default)]
 pub struct Workspace {
+    /// The blueprint an entity being docked from elsewhere comes from (see [`Outside`]).
+    outside: Option<Blueprint>,
     renderer: Option<Renderer>,
     blueprint: Option<Blueprint>,
     /// Which entity of the blueprint is on screen.
@@ -511,6 +554,8 @@ pub struct Workspace {
     /// The cells each entity's blocks span (by path; `None` when it has no
     /// blocks), measured once and kept up to date with edits.
     sizes: std::collections::HashMap<String, Option<Bounds>>,
+    /// The blocks of a piece being placed, in its own coordinates, as made.
+    piece: Option<yard_core::Entity>,
 }
 
 /// A rail being moved with the Move core tool instead of the core.
@@ -552,6 +597,31 @@ pub struct Cloning {
     pub replace: Option<String>,
     /// For a new rail: its arrow side, the way the copy rests.
     pub facing: [i32; 3],
+    /// What is docked when it comes from another blueprint (`source` is then "").
+    pub outside: Option<Outside>,
+}
+
+/// An entity of another blueprint being docked into the design (a turret).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Outside {
+    /// The server's job that keeps the blueprint.
+    pub job: String,
+    /// Its path there: "" for a turret saved on its own.
+    pub path: String,
+    /// What it is called, for the player.
+    pub label: String,
+    /// The kind of rail it hangs from.
+    pub rail_ty: u16,
+}
+
+impl Cloning {
+    /// What is copied, for the player: "the turret of Gunship", "docked 1".
+    pub fn what(&self) -> String {
+        match &self.outside {
+            Some(o) => o.label.clone(),
+            None => crate::entity_label(&self.source).to_lowercase(),
+        }
+    }
 }
 
 /// The marker for a cell being chosen: the cell, an arrow from it (the
@@ -693,6 +763,13 @@ pub struct Ctx {
     pub structure_undo: RwSignal<Option<String>>,
     /// Whether the dialog that asks to delete the open design is up.
     pub deleting: RwSignal<bool>,
+    /// Whether the open design's panel asks to confirm turning it into the other kind.
+    pub converting: RwSignal<bool>,
+    /// Long work the server is doing for this page (a smoothing pass), with
+    /// how far it has got, while it runs.
+    pub job: RwSignal<Option<JobView>>,
+    /// A piece made from a 3D model, being moved about before it is locked in.
+    pub placing: RwSignal<Option<Placing>>,
     /// The new name being typed for the open design, while renaming it.
     pub renaming: RwSignal<Option<String>>,
     pub symmetry: RwSignal<Symmetry>,
@@ -865,6 +942,9 @@ impl Ctx {
             dims: RwSignal::new(Dims::default()),
             structure_undo: RwSignal::new(None),
             deleting: RwSignal::new(false),
+            converting: RwSignal::new(false),
+            job: RwSignal::new(None),
+            placing: RwSignal::new(None),
             renaming: RwSignal::new(None),
             symmetry: RwSignal::new(Symmetry::default()),
             hover: RwSignal::new(String::new()),
@@ -1314,6 +1394,10 @@ impl Ctx {
     /// camera at it; a reload after falling out of step keeps the view.
     pub fn open_design(self, id: String, frame: bool) {
         self.say("Loading...");
+        self.converting.set(false);
+        if self.placing.with_untracked(|p| p.as_ref().is_some_and(|p| p.design != id)) {
+            self.cancel_piece();
+        }
         self.highlight.set(None);
         self.swap_from.set(None);
         if self.current.with_untracked(|c| c.as_ref().map(|s| s.id != id).unwrap_or(true)) {
@@ -1812,6 +1896,11 @@ impl Ctx {
     pub fn show_entity(self, path: String, frame: bool) {
         // Whatever is chosen, the design itself is what is shown.
         self.leave_core_preview();
+        // A piece goes into the entity it was made for.
+        if self.placing.with_untracked(|p| p.as_ref().is_some_and(|p| p.entity != path)) {
+            self.cancel_piece();
+            self.say("Placing the model was called off: it goes into the entity it was added to.");
+        }
         // Choosing another entity by hand calls off a cell being chosen on
         // this one (a core's new place, or a copy's rail).
         if frame && (self.relocating.get_untracked().is_some() || self.cloning.get_untracked().is_some()) {
@@ -1841,6 +1930,8 @@ impl Ctx {
                 renderer.camera.frame(corner(b.min, -0.5), corner(b.max, 0.5));
             }
         });
+        // Every mesh was cleared: the piece being placed comes back too.
+        self.draw_piece(true);
         if self.entity_path.get_untracked() != path {
             self.history.set(None);
             // A position means another block in another entity.
@@ -2168,37 +2259,7 @@ impl Ctx {
     /// One pass of smoothing over the whole entity on screen: the edges of
     /// steps beveled, then the inside corners. One step, so Undo takes it back.
     pub fn smooth_whole(self) {
-        if self.entity_path.get_untracked() == WHOLE || self.current.get_untracked().is_none() {
-            return self.say("Choose an entity on the left first.");
-        }
-        let opts = yard_core::smooth::Smoothing { step: self.smooth_step.get_untracked(), inside: self.smooth_inside.get_untracked(), sharpen: self.smooth_sharpen.get_untracked() };
-        self.say("Smoothing...");
-        // Let the message show before the work, which takes a moment on a big ship.
-        set_timeout(
-            move || {
-                let cells = self.ws.with_value(|w| {
-                    let Some(entity) = w.blueprint.as_ref().and_then(|bp| bp.entity(&w.path)).map(|e| &e.entity) else { return (Vec::new(), Vec::new()) };
-                    let done = yard_core::smooth::smooth_entity_opts(
-                        entity,
-                        &opts,
-                        |b| Self::smoothable(w, b),
-                        |b, f| w.looks.reshape(b, f.shape, f.slab, f.orientation),
-                        |b| Self::samples_of_block(w, b),
-                    );
-                    // Blocks reshaped, and wedges added in the notches of thin hulls.
-                    done.into_iter().partition::<Vec<_>, _>(|(p, _)| !entity.get(*p).is_air())
-                });
-                let (cells, added) = cells;
-                if cells.is_empty() && added.is_empty() {
-                    return self.say("Nothing more to smooth at this step height.");
-                }
-                let count = cells.len() + added.len();
-                if self.submit(Self::smoothing_ops(cells, added)).is_some() {
-                    self.say(format!("Smoothed {count} blocks into wedges, corner pieces and heptas. Press again for another pass; Undo takes this one back."));
-                }
-            },
-            std::time::Duration::from_millis(30),
-        );
+        self.smooth_on_server(false);
     }
 
     /// Smoothing done over: every wedge, corner, hepta and tetra of the hull
@@ -2206,50 +2267,328 @@ impl Ctx {
     /// out, then one pass, all as one step. For a design smoothed before,
     /// whose shapes an ordinary pass leaves alone.
     pub fn resmooth_whole(self) {
+        self.smooth_on_server(true);
+    }
+
+    /// A pass over a whole entity takes long on a big ship, so the server
+    /// does it while the page shows how far it has got. It writes the pass
+    /// as one step, which the page then loads.
+    fn smooth_on_server(self, again: bool) {
         if self.entity_path.get_untracked() == WHOLE || self.current.get_untracked().is_none() {
             return self.say("Choose an entity on the left first.");
         }
-        let opts = yard_core::smooth::Smoothing { step: self.smooth_step.get_untracked(), inside: self.smooth_inside.get_untracked(), sharpen: self.smooth_sharpen.get_untracked() };
-        self.say("Smoothing again from scratch...");
-        set_timeout(
-            move || {
-                let (cells, added, emptied) = self.ws.with_value(|w| {
-                    let Some(entity) = w.blueprint.as_ref().and_then(|bp| bp.entity(&w.path)).map(|e| &e.entity) else { return Default::default() };
-                    let done = yard_core::smooth::resmooth_entity_opts(
-                        entity,
-                        &opts,
-                        |b| Self::smoothable(w, b),
-                        |b, f| w.looks.reshape(b, f.shape, f.slab, f.orientation),
-                        |b| Self::samples_of_block(w, b),
-                        |b| Self::unshaped(w, b),
-                    );
-                    let (emptied, done): (Vec<_>, Vec<_>) = done.into_iter().partition(|(_, b)| b.is_air());
-                    let (cells, added): (Vec<_>, Vec<_>) = done.into_iter().partition(|(p, _)| !entity.get(*p).is_air());
-                    (cells, added, emptied)
-                });
-                if cells.is_empty() && added.is_empty() && emptied.is_empty() {
-                    return self.say("Smoothing it again from scratch changes nothing.");
+        if self.job.with_untracked(Option::is_some) {
+            return self.say("Still working on the last pass; wait for it, or stop it.");
+        }
+        if self.pending.get_untracked() > 0 {
+            return self.say("Still saving the last edit; try again in a moment.");
+        }
+        let Some(summary) = self.current.get_untracked() else { return };
+        let (rev, entity) = self.ws.with_value(|w| (w.rev, w.path.clone()));
+        let request = yard_core::api::SmoothRequest {
+            rev,
+            entity: entity.clone(),
+            step: self.smooth_step.get_untracked(),
+            inside: self.smooth_inside.get_untracked(),
+            sharpen: self.smooth_sharpen.get_untracked(),
+            again,
+        };
+        self.job_starting(if again { "Smoothing again from scratch" } else { "Smoothing" });
+        spawn_local(async move {
+            match api::start_smoothing(&summary.id, &request).await {
+                Ok(started) => self.follow_job(started.job, move |status| self.job_ended(summary.id, entity, status)),
+                Err(failure) => {
+                    self.job.set(None);
+                    self.structure_failed(summary.id, failure);
                 }
-                let count = cells.len() + added.len() + emptied.len();
-                let mut ops = Self::smoothing_ops(cells, added);
-                if !emptied.is_empty() {
-                    ops.push(Op::Set { cells: emptied, when: When::Occupied });
-                }
-                if self.submit(ops).is_some() {
-                    self.say(format!("Smoothed again from scratch: {count} blocks changed. Undo takes it back."));
-                }
-            },
-            std::time::Duration::from_millis(30),
-        );
+            }
+        });
     }
 
-    /// The whole block of a wedge, corner, hepta or tetra of a hull material.
-    fn unshaped(w: &Workspace, b: Block) -> Option<Block> {
-        let kind = w.looks.kind(b.ty());
-        if !matches!(kind.shape, Shape::Wedge | Shape::Corner | Shape::Tetra | Shape::Hepta) || w.looks.material(b.ty()).is_none() {
-            return None;
+    /// Shows the progress bar for work the server is about to start.
+    pub fn job_starting(self, title: impl Into<String>) {
+        self.job.set(Some(JobView { title: title.into(), id: None, status: None }));
+    }
+
+    /// Follows work the server has started, keeping the progress bar up to
+    /// date, and hands over how it ended once it has.
+    pub fn follow_job(self, job: String, ended: impl FnOnce(yard_core::api::JobStatus) + 'static) {
+        self.job.update(|j| {
+            if let Some(j) = j {
+                j.id = Some(job.clone());
+            }
+        });
+        spawn_local(async move {
+            loop {
+                crate::chat::sleep(JOB_POLL_MS).await;
+                let status = match api::job_status(&job).await {
+                    Ok(status) => status,
+                    Err(e) => {
+                        self.job.set(None);
+                        return self.fail(e);
+                    }
+                };
+                if status.state == yard_core::api::JobState::Running {
+                    self.job.update(|j| {
+                        if let Some(j) = j {
+                            j.status = Some(status);
+                        }
+                    });
+                    continue;
+                }
+                self.job.set(None);
+                return ended(status);
+            }
+        });
+    }
+
+    /// A piece of work the server did has ended: what it wrote is loaded,
+    /// with the entity it worked on still on screen and the view left as it is.
+    fn job_ended(self, id: String, entity: String, status: yard_core::api::JobStatus) {
+        use yard_core::api::JobState;
+        match status.state {
+            JobState::Done if status.rev.is_some() => {
+                // Still the same design on screen: load what the server wrote.
+                if self.current.with_untracked(|c| c.as_ref().is_some_and(|s| s.id == id)) {
+                    self.ws.update_value(|w| w.show_after = Some(entity));
+                    self.open_design(id, false);
+                    self.ws.update_value(|w| w.notice = Some(status.message));
+                } else {
+                    self.say(status.message);
+                }
+            }
+            JobState::Done | JobState::Stopped | JobState::Running => self.say(status.message),
+            JobState::Failed => self.fail(status.message),
         }
-        w.looks.reshape(b, Shape::Cube, 0, 0).filter(|c| Self::smoothable(w, *c))
+    }
+
+    // ---- placing a piece made from a 3D model ----
+
+    /// Cuts a 3D model into a piece on the server, then puts it beside the
+    /// entity on screen for the player to move into place.
+    /// Makes a piece to place in the entity on screen: a 3D model cut into
+    /// blocks, or the hull blocks of a blueprint or another design.
+    pub fn add_piece(self, from: PieceFrom) {
+        let entity = self.entity_path.get_untracked();
+        let Some(summary) = self.current.get_untracked() else { return self.fail("Open a design to add to first.") };
+        if entity == WHOLE {
+            return self.fail("Choose the entity on the left that it goes into first.");
+        }
+        if self.job.with_untracked(Option::is_some) {
+            return self.say("Still working on something else; wait for it, or stop it.");
+        }
+        self.cancel_piece();
+        self.job_starting(match &from {
+            PieceFrom::Model { .. } => "Cutting the model into blocks",
+            _ => "Reading the blueprint",
+        });
+        spawn_local(async move {
+            let started = match &from {
+                PieceFrom::Model { name, bytes, choices } => api::start_piece(&summary.id, name, bytes, choices).await,
+                PieceFrom::Source(job) => api::piece_from_source(&summary.id, job).await,
+            };
+            let started = match started {
+                Ok(started) => started.job,
+                Err(e) => {
+                    self.job.set(None);
+                    return self.fail(e);
+                }
+            };
+            let job = started.clone();
+            self.follow_job(started, move |status| {
+                use yard_core::api::JobState;
+                match status.state {
+                    JobState::Done => spawn_local(async move {
+                        match api::piece(&job).await {
+                            Ok(piece) => self.begin_placing(job, summary.id, entity, piece.root.entity, status.message),
+                            Err(e) => self.fail(e),
+                        }
+                    }),
+                    JobState::Failed => self.fail(status.message),
+                    _ => self.say(status.message),
+                }
+            });
+        });
+    }
+
+    /// Puts a piece on screen just above the entity, ready to be moved.
+    fn begin_placing(self, job: String, design: String, entity: String, piece: yard_core::Entity, message: String) {
+        if self.current.with_untracked(|c| c.as_ref().map(|s| s.id.clone())) != Some(design.clone()) || self.entity_path.get_untracked() != entity {
+            return self.say("The model is ready, but another design or entity is on screen now. Add it again there.");
+        }
+        let blocks = piece.block_count();
+        let at = self.ws.with_value(|w| {
+            let (Some(b), Some(p)) = (w.bounds, piece.bounds()) else { return [0, 0, 0] };
+            // Centred over the entity, resting just above it.
+            [(b.min.x + b.max.x) / 2, b.max.y + 2 - p.min.y, (b.min.z + b.max.z) / 2]
+        });
+        self.ws.update_value(|w| w.piece = Some(piece));
+        let fit = yard_core::merge::Fit { at, ..Default::default() };
+        self.placing.set(Some(Placing { job, design, entity, blocks, fit, replace: false, step: 1 }));
+        self.draw_piece(true);
+        self.say(format!("{message} Move it into place, then lock it in."));
+    }
+
+    /// Draws the piece where it is placed. With `remesh`, its blocks are
+    /// meshed again (needed when it is mirrored, or after the view was
+    /// cleared); else it is only moved, which costs nothing.
+    fn draw_piece(self, remesh: bool) {
+        let Some(placing) = self.placing.get_untracked() else { return };
+        self.ws.update_value(|w| {
+            let Workspace { renderer: Some(renderer), piece: Some(piece), looks, .. } = w else { return };
+            if remesh {
+                renderer.clear_group(PIECE_GROUP);
+                let shape_of = |ty: u16| {
+                    let k = looks.kind(ty);
+                    (k.shape, k.faces_matter)
+                };
+                let mirrored;
+                let drawn = if placing.fit.mirror {
+                    mirrored = yard_core::merge::mirrored(piece, &shape_of);
+                    &mirrored
+                } else {
+                    &*piece
+                };
+                for (key, _) in drawn.segments() {
+                    renderer.set_chunk(PIECE_GROUP, *key, &mesh::build_segment(drawn, *key, looks));
+                }
+            }
+            renderer.place_group(PIECE_GROUP, placing.fit.placement().matrix());
+        });
+        self.refresh_overlay();
+        self.redraw();
+    }
+
+    /// Changes where the piece is placed and draws it there.
+    fn refit(self, change: impl FnOnce(&mut Placing)) {
+        let Some(mut placing) = self.placing.get_untracked() else { return };
+        let mirror = placing.fit.mirror;
+        change(&mut placing);
+        let remesh = placing.fit.mirror != mirror;
+        self.placing.set(Some(placing));
+        self.draw_piece(remesh);
+    }
+
+    /// Moves the piece by whole steps along X, Y and Z.
+    pub fn move_piece(self, by: [i32; 3]) {
+        self.refit(|p| {
+            for (a, d) in by.into_iter().enumerate() {
+                p.fit.at[a] += d * p.step;
+            }
+        });
+    }
+
+    /// Moves the piece the way a movement key points from where the view
+    /// looks: by its step, or ten blocks with `ten`.
+    pub fn nudge_piece(self, code: &str, ten: bool) {
+        let (forward, right) = self.ws.with_value(|w| w.renderer.as_ref().map(|r| r.camera.heading())).unwrap_or(([0, 0, -1], [1, 0, 0]));
+        let step = match code {
+            "KeyW" | "ArrowUp" => forward,
+            "KeyS" | "ArrowDown" => forward.map(|v| -v),
+            "KeyD" | "ArrowRight" => right,
+            "KeyA" | "ArrowLeft" => right.map(|v| -v),
+            "KeyE" | "PageUp" => [0, 1, 0],
+            "KeyQ" | "PageDown" => [0, -1, 0],
+            _ => return,
+        };
+        if ten {
+            self.refit(|p| (0..3).for_each(|a| p.fit.at[a] += step[a] * 10));
+        } else {
+            self.move_piece(step);
+        }
+    }
+
+    /// Puts the piece at a cell given number by number.
+    pub fn set_piece_at(self, axis: usize, value: i32) {
+        self.refit(|p| p.fit.at[axis] = value);
+    }
+
+    /// Turns the piece a quarter turn about Y (0), X (1) or Z (2), one way
+    /// or back (`back`).
+    pub fn turn_piece(self, axis: usize, back: bool) {
+        self.refit(|p| {
+            let by = if back { 3 } else { 1 };
+            let f = &mut p.fit;
+            match axis {
+                0 => f.yaw = (f.yaw + by) % 4,
+                1 => f.pitch = (f.pitch + by) % 4,
+                _ => f.roll = (f.roll + by) % 4,
+            }
+        });
+    }
+
+    pub fn mirror_piece(self, on: bool) {
+        self.refit(|p| p.fit.mirror = on);
+    }
+
+    pub fn piece_replaces(self, on: bool) {
+        self.refit(|p| p.replace = on);
+    }
+
+    pub fn piece_step(self, step: i32) {
+        self.refit(|p| p.step = step.max(1));
+    }
+
+    /// Takes the piece off the screen; nothing is changed.
+    pub fn cancel_piece(self) {
+        if self.placing.get_untracked().is_none() {
+            return;
+        }
+        self.placing.set(None);
+        self.ws.update_value(|w| {
+            w.piece = None;
+            if let Some(r) = &mut w.renderer {
+                r.clear_group(PIECE_GROUP);
+            }
+        });
+        self.refresh_overlay();
+        self.redraw();
+    }
+
+    /// Writes the piece into the entity where it is placed: one step, which Undo takes back.
+    pub fn lock_piece(self) {
+        let Some(placing) = self.placing.get_untracked() else { return };
+        if self.pending.get_untracked() > 0 {
+            return self.say("Still saving the last edit; try again in a moment.");
+        }
+        let rev = self.ws.with_value(|w| w.rev);
+        let request = yard_core::api::MergeRequest { rev, entity: placing.entity.clone(), piece: placing.job.clone(), fit: placing.fit, replace: placing.replace };
+        self.say("Locking it in...");
+        spawn_local(async move {
+            match api::merge_piece(&placing.design, &request).await {
+                Ok(done) => {
+                    self.cancel_piece();
+                    let kept = match (done.kept_back, placing.replace) {
+                        (0, _) => String::new(),
+                        (n, _) => format!(" {n} of its blocks were left out where the design already had one."),
+                    };
+                    self.ws.update_value(|w| w.show_after = Some(placing.entity.clone()));
+                    self.open_design(placing.design.clone(), false);
+                    let linked = match done.linked {
+                        0 => String::new(),
+                        1 => " with 1 link".to_string(),
+                        n => format!(" with {} links", crate::thousands(n)),
+                    };
+                    self.ws.update_value(|w| w.notice = Some(format!("Locked in {} blocks{linked}.{kept} Undo takes it back out.", crate::thousands(done.written))));
+                }
+                // The design moved on: it is loaded again, and the piece stays where it was put.
+                Err(api::StepFailure::OutOfStep(why)) => {
+                    self.open_design_saying(placing.design.clone(), &format!("{why} It was loaded again; the model is still where you put it. Lock it in again."));
+                }
+                Err(api::StepFailure::Refused(why)) => self.fail(why),
+            }
+        });
+    }
+
+    /// Asks the server to stop the work the progress bar shows.
+    pub fn stop_job(self) {
+        let Some(job) = self.job.with_untracked(|j| j.as_ref().and_then(|j| j.id.clone())) else { return };
+        self.say("Stopping...");
+        spawn_local(async move {
+            if let Err(e) = api::stop_job(&job).await {
+                self.fail(e);
+            }
+        });
     }
 
     /// The steps that write what smoothing planned: blocks reshaped where
@@ -2722,6 +3061,7 @@ impl Ctx {
     pub fn cancel_relocation(self) {
         let back = self.leave_core_preview();
         self.cloning.set(None);
+        self.ws.update_value(|w| w.outside = None);
         self.relocating.set(None);
         self.core_facing.set(CORE_AS_IS);
         self.turret_parts.set(None);
@@ -2837,13 +3177,19 @@ impl Ctx {
         };
         let mut made_path = String::new();
         let done = self.enter_preview(|w, copy| {
-            let made = yard_core::clone::clone_docked(copy, &w.looks, &job.source, &place).map_err(sentence)?;
+            let made = match &job.outside {
+                Some(o) => {
+                    let other = w.outside.as_ref().ok_or_else(|| "The blueprint to dock from is not loaded; choose it again.".to_string())?;
+                    yard_core::clone::dock_from(copy, &w.looks, other, &o.path, &place).map_err(sentence)?
+                }
+                None => yard_core::clone::clone_docked(copy, &w.looks, &job.source, &place).map_err(sentence)?,
+            };
             made_path = made.child;
             Ok(made.notes)
         });
         match done {
             Ok((path, notes)) => {
-                let about = format!("{} copied as {}", crate::entity_label(&job.source).to_lowercase(), crate::entity_label(&made_path).to_lowercase());
+                let about = format!("{} copied as {}", job.what(), crate::entity_label(&made_path).to_lowercase());
                 self.show_preview(&path, &made_path, about, &notes);
                 self.say(format!("Previewing; nothing is saved. {}", notes.join(" ")));
             }
@@ -3064,10 +3410,11 @@ impl Ctx {
             let text = self.ws.with_value(|w| {
                 let bp = w.blueprint.as_ref();
                 let block = bp.and_then(|bp| bp.entity(&w.path)).map_or(Block::AIR, |e| e.entity.get(at));
-                let kind = bp.and_then(|bp| bp.docks().get(&job.source).map(|d| d.rail.ty)).map_or("rail", rail_kind);
+                let kind = job.outside.as_ref().map(|o| o.rail_ty).or_else(|| bp.and_then(|bp| bp.docks().get(&job.source).map(|d| d.rail.ty))).map_or("rail", rail_kind);
                 let in_place = if block.is_air() { String::new() } else { format!(", in place of {}", w.looks.name(block.ty())) };
                 format!(
-                    "The copy's {kind} would go to {}, {}, {}{in_place}, the copy resting on its {} side (its rail docker in the cell that way, which must be empty). Enter confirms, Escape cancels.",
+                    "The {kind} for {} would go to {}, {}, {}{in_place}, resting on its {} side (its rail docker in the cell that way, which must be empty). Enter confirms, Escape cancels.",
+                    job.what(),
                     at.x,
                     at.y,
                     at.z,
@@ -3233,6 +3580,24 @@ impl Ctx {
             return self.say("Still saving the last edit; try again in a moment.");
         }
         let rev = self.ws.with_value(|w| w.rev);
+        if let Some(o) = job.outside.clone() {
+            self.say("Docking...");
+            let (parent, at, facing) = match new {
+                Some((p, a, f)) => (Some(p), Some(a), Some(f)),
+                None => (None, None, None),
+            };
+            let request = yard_core::api::DockFromRequest { rev, job: o.job, path: o.path, replace: job.replace.clone(), parent, at, facing };
+            spawn_local(async move {
+                match api::dock_from(&summary.id, &request).await {
+                    Ok(done) => {
+                        self.ws.update_value(|w| w.outside = None);
+                        self.structure_done(summary.id, done, "Docked it")
+                    }
+                    Err(e) => self.structure_failed(summary.id, e),
+                }
+            });
+            return;
+        }
         self.say("Copying...");
         spawn_local(async move {
             match api::clone_docked(&summary.id, rev, &job.source, job.replace.clone(), new).await {
@@ -3271,7 +3636,7 @@ impl Ctx {
         self.stop_sim();
         self.turret_box.set(None);
         self.relocating.set(None);
-        let job = Cloning { source, parent: Self::parent_path(&target), replace: Some(target), facing: [0, 0, 0] };
+        let job = Cloning { source, parent: Self::parent_path(&target), replace: Some(target), facing: [0, 0, 0], outside: None };
         self.cloning.set(Some(job.clone()));
         self.preview_clone(job);
     }
@@ -3290,7 +3655,7 @@ impl Ctx {
         self.turret_box.set(None);
         let (up, _) = yard_core::shape::turned_axes(rail.orientation);
         let parent = Self::parent_path(&source);
-        self.cloning.set(Some(Cloning { source: source.clone(), parent: parent.clone(), replace: None, facing: up }));
+        self.cloning.set(Some(Cloning { source: source.clone(), parent: parent.clone(), replace: None, facing: up, outside: None }));
         self.show_entity(parent.clone(), true);
         self.set_relocation(rail.pos);
         self.say(format!(
@@ -3310,6 +3675,69 @@ impl Ctx {
         if let Some(at) = self.relocating.get_untracked() {
             self.set_relocation(at);
         }
+    }
+
+    /// Starts docking an entity of another blueprint (a turret) into the
+    /// design: its blueprint is fetched, then the Clone tool chooses the
+    /// cell for its new rail on the entity on screen, as for a copy.
+    pub fn start_docking(self, outside: Outside) {
+        let Some(summary) = self.current.get_untracked() else { return self.fail("Open a design to dock it onto first.") };
+        let entity = self.entity_path.get_untracked();
+        let parent = if entity == WHOLE { String::new() } else { entity };
+        self.say(format!("Fetching {}...", outside.label));
+        spawn_local(async move {
+            let other = match api::source_blueprint(&outside.job, &outside.path).await {
+                Ok(bp) => bp,
+                Err(e) => return self.fail(e),
+            };
+            if self.current.with_untracked(|c| c.as_ref().map(|s| s.id.clone())) != Some(summary.id) {
+                return self.say("Another design is on screen now. Choose the turret again there.");
+            }
+            self.cancel_piece();
+            self.cancel_relocation();
+            self.stop_sim();
+            self.turret_box.set(None);
+            self.ws.update_value(|w| w.outside = Some(other));
+            self.tool.set(Tool::Clone);
+            let label = outside.label.clone();
+            self.cloning.set(Some(Cloning { source: String::new(), parent: parent.clone(), replace: None, facing: [0, 1, 0], outside: Some(outside) }));
+            self.show_entity(parent.clone(), true);
+            // To begin with: on top of the entity, over its middle.
+            let start = self.ws.with_value(|w| {
+                let e = w.blueprint.as_ref()?.entity(&parent)?;
+                let b = e.entity.bounds()?;
+                let (x, z) = ((b.min.x + b.max.x) / 2, (b.min.z + b.max.z) / 2);
+                let top = (b.min.y..=b.max.y).rev().find(|y| !e.entity.get(Pos::new(x, *y, z)).is_air()).unwrap_or(b.max.y);
+                Some(Pos::new(x, top, z))
+            });
+            self.set_relocation(start.unwrap_or(Pos::new(0, 1, 0)));
+            self.say(format!(
+                "Choosing where {label} docks on {}: click a block to make it the turret axis (it rests on the face clicked), or Shift-click the space in front of it; W A S D E Q move it, Enter docks it, Escape cancels. Preview shows it in place.",
+                crate::entity_label(&parent).to_lowercase()
+            ));
+        });
+    }
+
+    /// Previews the entity from elsewhere in place of the docked entity at `target`.
+    pub fn dock_in_place_of(self, target: String) {
+        let Some(mut job) = self.cloning.get_untracked().filter(|c| c.outside.is_some()) else { return };
+        if target.is_empty() {
+            return;
+        }
+        if let Some(path) = self.leave_core_preview() {
+            self.show_entity(path, false);
+        }
+        self.relocating.set(None);
+        job.parent = Self::parent_path(&target);
+        job.replace = Some(target);
+        self.cloning.set(Some(job.clone()));
+        self.preview_clone(job);
+    }
+
+    /// Every docked entity of the design, by path and name, for something
+    /// from elsewhere to take the place of.
+    pub fn docked_entities(self) -> Vec<(String, String)> {
+        self.ws.with_value(|w| w.blueprint.as_ref().map(|bp| bp.docks().keys().map(|p| (p.clone(), crate::entity_label(p))).collect()).unwrap_or_default())
     }
 
     /// The design has changed shape on the server: load it again and show what was made.
@@ -3353,6 +3781,29 @@ impl Ctx {
                     self.deleting.set(false);
                     self.fail(e);
                 }
+            }
+        });
+    }
+
+    /// Turns the open design into a ship or a station (`to` is "ship" or
+    /// "station"). A change of structure: the undo history goes, and "put
+    /// back" can take it back until the next edit.
+    pub fn convert_design(self, to: &'static str) {
+        self.converting.set(false);
+        let Some(summary) = self.current.get_untracked() else { return };
+        if self.pending.get_untracked() > 0 {
+            return self.say("Still saving the last edit; try again in a moment.");
+        }
+        let rev = self.ws.with_value(|w| w.rev);
+        let station = to == "station";
+        self.say(if station { "Making it a station..." } else { "Making it a ship..." });
+        spawn_local(async move {
+            match api::convert_design(&summary.id, rev, to).await {
+                Ok(done) => {
+                    self.structure_done(summary.id, done, if station { "Made it a station" } else { "Made it a ship" });
+                    self.refresh_designs();
+                }
+                Err(e) => self.structure_failed(summary.id, e),
             }
         });
     }
@@ -4079,6 +4530,7 @@ impl Ctx {
         let (selected, turn) = (self.block_id.get_untracked(), self.turn.get_untracked());
         let (linking, link_from) = (self.tool.get_untracked() == Tool::Link, self.selected.get_untracked());
         let (picked, linking_tool) = (self.picked.get_untracked(), self.tool.get_untracked());
+        let placing = self.placing.get_untracked();
         let text = self.ws.try_update_value(|w| {
             if w.path == WHOLE {
                 // Looking only: name the block under the pointer and the
@@ -4246,6 +4698,12 @@ impl Ctx {
                     for i in 0..4 {
                         overlay.line(corners[i], corners[(i + 1) % 4], [c[0], c[1], c[2], 150]);
                     }
+                }
+            }
+            // The box a piece being placed takes up.
+            if let (Some(placing), Some(piece)) = (&placing, &w.piece) {
+                if let Some((lo, hi)) = yard_core::merge::placed_bounds(piece, &placing.fit) {
+                    overlay.wire_box(corner(lo, -0.55), corner(hi, 0.55), [80, 200, 255, 255]);
                 }
             }
             if let Some(r) = &mut w.renderer {

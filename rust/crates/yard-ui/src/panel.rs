@@ -320,14 +320,26 @@ pub fn BuildPanel(ctx: Ctx) -> impl IntoView {
                     let path = ctx.entity_path.get();
                     match ctx.cloning.get() {
                         Some(job) if job.replace.is_some() => view! {
-                            <p class="empty">{format!("A copy of {} in place of {}, which goes with everything docked to it; the copy hangs from the rail it hung from. Confirm makes it.", entity_label(&job.source).to_lowercase(), entity_label(job.replace.as_deref().unwrap_or_default()).to_lowercase())}</p>
+                            <p class="empty">{format!("{} in place of {}, which goes with everything docked to it; it hangs from the rail that hung from. Confirm makes it.", if job.outside.is_some() { job.what() } else { format!("A copy of {}", job.what()) }, entity_label(job.replace.as_deref().unwrap_or_default()).to_lowercase())}</p>
                             <div class="row">
                                 <button class="current" on:click=move |_| ctx.confirm_relocation()>"Confirm"</button>
                                 <button on:click=move |_| ctx.cancel_relocation()>"Cancel"</button>
                             </div>
                         }.into_any(),
                         Some(job) => view! {
-                            <p class="empty">{format!("Choosing where the copy of {} goes on {}: click a block to make it the rail (the copy rests on the face clicked), or Shift-click the space in front of it; W A S D E Q move it. The orange box is the original's rail; the cell in front of the new rail must be empty for the copy's rail docker.", entity_label(&job.source).to_lowercase(), entity_label(&job.parent).to_lowercase())}</p>
+                            <p class="empty">{if job.outside.is_some() {
+                                format!("Choosing where {} docks on {}: click a block to make it the new rail (it rests on the face clicked), or Shift-click the space in front of it; W A S D E Q move it. The cell in front of the rail must be empty for its rail docker.", job.what(), entity_label(&job.parent).to_lowercase())
+                            } else {
+                                format!("Choosing where the copy of {} goes on {}: click a block to make it the rail (the copy rests on the face clicked), or Shift-click the space in front of it; W A S D E Q move it. The orange box is the original's rail; the cell in front of the new rail must be empty for the copy's rail docker.", job.what(), entity_label(&job.parent).to_lowercase())
+                            }}</p>
+                            <Show when={let outside = job.outside.is_some(); move || outside && !ctx.docked_entities().is_empty()}>
+                                <label>"Or in place of"
+                                    <select on:change=move |ev| { ctx.dock_in_place_of(event_target_value(&ev)); crate::let_go_of_focus(); }>
+                                        <option value="" selected=true>"A docked entity of this design..."</option>
+                                        {ctx.docked_entities().into_iter().map(|(p, label)| view! { <option value=p>{label}</option> }).collect_view()}
+                                    </select>
+                                </label>
+                            </Show>
                             <label>"The copy rests on the rail's"
                                 <select on:change=move |ev| { ctx.set_clone_facing(event_target_value(&ev).parse().unwrap_or(2)); crate::let_go_of_focus(); }>
                                     {CORE_SIDES
@@ -385,9 +397,9 @@ pub fn BuildPanel(ctx: Ctx) -> impl IntoView {
                 <p class="empty">
                     "Click to put wedges on the outer edges of steps inside the brush (set its size below), with corner pieces and heptas where the edges meet. A higher step height bevels taller drops. With the inside too, the inner face of a thin hull gets wedges in its notches, so it slopes like the outer face. Right-click turns wedges, corners, tetras and heptas in the brush back into whole blocks (and takes out the notch wedges)."
                 </p>
-                <button title="One pass over every block of the entity on screen, at the step height above" on:click=move |_| ctx.smooth_whole()>"Smooth whole entity"</button>
+                <button title="One pass over every block of the entity on screen, at the step height above" disabled=move || ctx.job.with(Option::is_some) on:click=move |_| ctx.smooth_whole()>"Smooth whole entity"</button>
                 <p class="empty">"Press again for another pass (a higher step height bevels taller steps); Undo takes a pass back."</p>
-                <button title="Turns every wedge, corner, hepta and tetra of hull blocks back into a whole block, takes out the notch wedges, then smooths once, all as one step" on:click=move |_| ctx.resmooth_whole()>"Smooth again from scratch"</button>
+                <button title="Turns every wedge, corner, hepta and tetra of hull blocks back into a whole block, takes out the notch wedges, then smooths once, all as one step" disabled=move || ctx.job.with(Option::is_some) on:click=move |_| ctx.resmooth_whole()>"Smooth again from scratch"</button>
                 <p class="empty">"A pass leaves blocks that already have a shape alone. To redo a design smoothed before (or by an older version of this tool), smooth it again from scratch. Shapes placed by hand in hull blocks are redone too."</p>
             </Show>
             <Show when=move || ctx.tool.get() == Tool::Paint>

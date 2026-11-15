@@ -90,6 +90,38 @@ fn obj_with_a_texture_in_the_zip_paints_blocks_from_the_picture() {
 }
 
 #[test]
+fn vrml_with_a_texture_in_the_zip_paints_blocks_from_the_picture() {
+    let wrl = "#VRML V2.0 utf8\nShape {\n appearance Appearance {\n  material Material { diffuseColor 0.5 0.5 0.5 }\n  texture ImageTexture { url [ \"textures/Hull Paint.png\" \"http://example.com/x.png\" ] }\n }\n geometry IndexedFaceSet {\n  coord Coordinate { point [ 0 0 0, 8 0 0, 8 0 8, 0 0 8 ] }\n  coordIndex [ 0, 1, 2, -1, 0, 2, 3, -1 ]\n  texCoord TextureCoordinate { point [ 1 1, 0 0, 1 0, 0 1 ] }\n  texCoordIndex [ 1, 2, 0, -1, 1, 0, 3, -1 ]\n }\n}\n";
+    let packed = samples::zip(&[("plate.wrl", wrl.as_bytes()), ("textures/hull paint.png", &samples::png())]);
+    let model = read("plate.zip", &packed).unwrap();
+    assert_eq!(model.textures.len(), 1);
+    assert!(model.triangles.iter().all(|t| matches!(t.paint, Paint::Textured { texture: 0, .. })));
+    let voxels = voxelize(&model, &Options { longest: 8, ..Options::default() }).unwrap();
+    assert_eq!(voxels.cells.len(), 64);
+    for cell in &voxels.cells {
+        assert_eq!(cell.colour, Some(if cell.pos[0] < 4 { RED } else { BLUE }), "{:?}", cell.pos);
+    }
+    // Without the picture the material's own colour is used, and noted.
+    let bare = read("plate.wrl", wrl.as_bytes()).unwrap();
+    assert!(bare.triangles.iter().all(|t| t.paint == Paint::Flat([128, 128, 128])));
+    assert_eq!(bare.notes, vec!["Textures were not found in the upload; material colours were used."]);
+}
+
+#[test]
+fn x3d_texture_coordinates_follow_the_points_without_their_own_order() {
+    let x3d = r#"<X3D><Scene><Shape><Appearance><ImageTexture url='"skin.png" "other.png"'/></Appearance>
+        <IndexedFaceSet coordIndex="0 1 2 -1 0 2 3 -1"><Coordinate point="0 0 0 8 0 0 8 0 8 0 0 8"/>
+        <TextureCoordinate point="0 0 1 0 1 1 0 1"/></IndexedFaceSet></Shape></Scene></X3D>"#;
+    let packed = samples::zip(&[("plate.x3d", x3d.as_bytes()), ("skin.png", &samples::png())]);
+    let model = read("plate.zip", &packed).unwrap();
+    assert_eq!(model.textures.len(), 1);
+    let voxels = voxelize(&model, &Options { longest: 8, ..Options::default() }).unwrap();
+    for cell in &voxels.cells {
+        assert_eq!(cell.colour, Some(if cell.pos[0] < 4 { RED } else { BLUE }), "{:?}", cell.pos);
+    }
+}
+
+#[test]
 fn stl_as_text_and_as_bytes_both_give_the_cube() {
     for (name, bytes) in [("a.stl", samples::stl_text().into_bytes()), ("b.stl", samples::stl_binary(b"binary cube"))] {
         let model = read(name, &bytes).unwrap();

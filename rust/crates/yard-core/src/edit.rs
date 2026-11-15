@@ -314,11 +314,18 @@ pub fn apply(entity: &mut Entity, ops: &[Op]) -> Result<Change, EditError> {
 /// Applies the ops of one step. Nothing is changed if any of them is refused.
 /// The caller records the returned change in a [`Journal`] to make it undoable.
 pub fn apply_with(entity: &mut Entity, ops: &[Op], rules: &Rules) -> Result<Change, EditError> {
+    apply_within(entity, ops, rules, MAX_CELLS)
+}
+
+/// [`apply_with`] with another limit on the cells one step may cover: for
+/// steps the server works out itself (a smoothing pass over a big ship),
+/// which a browser could not have sent.
+pub fn apply_within(entity: &mut Entity, ops: &[Op], rules: &Rules, most: u64) -> Result<Change, EditError> {
     let mut total = 0u64;
     for op in ops {
         total = total.saturating_add(budget(op)?);
     }
-    if total > MAX_CELLS {
+    if total > most {
         return Err(EditError::TooLarge(total));
     }
 
@@ -503,11 +510,16 @@ pub fn run(entity: &mut Entity, journal: &mut Journal, ops: &[Op]) -> Result<Cha
 /// Runs one step against an entity and its history: either a lone undo or redo,
 /// or a group of edits that become a single undoable step.
 pub fn run_with(entity: &mut Entity, journal: &mut Journal, ops: &[Op], rules: &Rules) -> Result<Change, EditError> {
+    run_within(entity, journal, ops, rules, MAX_CELLS)
+}
+
+/// [`run_with`] with another limit on the cells of a step (see [`apply_within`]).
+pub fn run_within(entity: &mut Entity, journal: &mut Journal, ops: &[Op], rules: &Rules, most: u64) -> Result<Change, EditError> {
     match ops {
         [Op::Undo] => journal.undo(entity),
         [Op::Redo] => journal.redo(entity),
         _ => {
-            let change = apply_with(entity, ops, rules)?;
+            let change = apply_within(entity, ops, rules, most)?;
             journal.record(change.clone());
             Ok(change)
         }

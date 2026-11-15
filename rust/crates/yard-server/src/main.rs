@@ -4,6 +4,7 @@ mod app;
 mod chat;
 mod history;
 mod importer;
+mod jobs;
 mod models;
 mod palette;
 mod sessions;

@@ -26,7 +26,7 @@ enum Line {
 const MODEL_KEY: &str = "yard.chat_model";
 const POLL_MS: i32 = 500;
 
-async fn sleep(ms: i32) {
+pub(crate) async fn sleep(ms: i32) {
     let promise = js_sys::Promise::new(&mut |resolve, _| {
         let _ = window().set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
     });

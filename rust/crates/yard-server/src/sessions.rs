@@ -120,6 +120,12 @@ impl Sessions {
 
     /// Applies one step from an editor.
     pub fn step(&self, store: &Store, catalog: &Catalog, id: &str, request: &StepRequest) -> Result<StepResponse, StepError> {
+        self.step_within(store, catalog, id, request, edit::MAX_CELLS)
+    }
+
+    /// [`Sessions::step`] with another limit on the cells it may cover, for
+    /// steps the server worked out itself from the design at `request.rev`.
+    pub fn step_within(&self, store: &Store, catalog: &Catalog, id: &str, request: &StepRequest, most: u64) -> Result<StepResponse, StepError> {
         self.with(store, id, |design| {
             if design.rev != request.rev {
                 return Err(StepError::Stale);
@@ -129,7 +135,7 @@ impl Sessions {
             let journal = journals.entry(request.entity.clone()).or_default();
             // Links follow the game's rules, the same ones the editor applied.
             let rules = Rules::new(catalog, Kind::of_entity_type(entity.header.entity_type));
-            let change = edit::run_with(&mut entity.entity, journal, &request.ops, &rules).map_err(StepError::Refused)?;
+            let change = edit::run_within(&mut entity.entity, journal, &request.ops, &rules, most).map_err(StepError::Refused)?;
             let (undo, redo) = journal.depth();
             let from_history = matches!(request.ops.as_slice(), [Op::Undo] | [Op::Redo]);
             // After an edit "put back" would lose it.
@@ -210,6 +216,17 @@ impl Sessions {
             design.rev += 1;
             design.last_edit = Instant::now();
             Ok((before, design.rev, change))
+        })
+    }
+
+    /// A copy of one entity of a design as it is at `rev`, to work on away
+    /// from the design's lock (which edits would otherwise wait on).
+    pub fn entity_at(&self, store: &Store, id: &str, rev: u64, path: &str) -> Result<yard_core::Entity, StepError> {
+        self.with(store, id, |design| {
+            if design.rev != rev {
+                return Err(StepError::Stale);
+            }
+            Ok(design.blueprint.entity(path).ok_or(StepError::NoSuchEntity)?.entity.clone())
         })
     }
 

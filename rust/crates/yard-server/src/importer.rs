@@ -38,8 +38,17 @@ pub struct Choices {
     pub step: u8,
 }
 
+/// What [`ship_from_model`] gives back when the progress callback asked it to stop.
+pub const STOPPED: &str = "Stopped. No design was made.";
+
+/// How many steps [`ship_from_model`] tells its progress callback about.
+pub const STEPS: u32 = 3;
+
 /// Reads a model file and builds a ship from it. Returns the blueprint and
-/// the notes to show the player.
+/// the notes to show the player. `step` hears of each of the [`STEPS`] steps
+/// as it starts (its number from 1, and what it is) and stops the work by
+/// answering false.
+#[allow(clippy::too_many_arguments)]
 pub fn ship_from_model(
     catalog: &Catalog,
     palette: &[(u16, [u8; 3])],
@@ -48,10 +57,56 @@ pub fn ship_from_model(
     file_name: &str,
     bytes: &[u8],
     choices: &Choices,
+    step: &dyn Fn(u32, &str) -> bool,
 ) -> Result<(Blueprint, Vec<String>), String> {
+    build(catalog, palette, game_version, name, file_name, bytes, choices, step).map(|(bp, notes, _)| (bp, notes))
+}
+
+/// The blocks of a model as a piece to fit into another design: what
+/// [`ship_from_model`] makes, but with the model's own block in the cell
+/// where a ship has its core. Its origin is that cell, near its middle.
+#[allow(clippy::too_many_arguments)]
+pub fn piece_from_model(
+    catalog: &Catalog,
+    palette: &[(u16, [u8; 3])],
+    game_version: &str,
+    name: &str,
+    file_name: &str,
+    bytes: &[u8],
+    choices: &Choices,
+    step: &dyn Fn(u32, &str) -> bool,
+) -> Result<(Blueprint, Vec<String>), String> {
+    let (mut bp, notes, middle) = build(catalog, palette, game_version, name, file_name, bytes, choices, step)?;
+    let root = &mut bp.root;
+    root.entity.set(Pos::new(0, 0, 0), middle);
+    root.header.refresh(&root.entity);
+    Ok((bp, notes))
+}
+
+/// Makes the ship, and gives the block the model has in the core's cell.
+#[allow(clippy::too_many_arguments)]
+fn build(
+    catalog: &Catalog,
+    palette: &[(u16, [u8; 3])],
+    game_version: &str,
+    name: &str,
+    file_name: &str,
+    bytes: &[u8],
+    choices: &Choices,
+    step: &dyn Fn(u32, &str) -> bool,
+) -> Result<(Blueprint, Vec<String>, Block), String> {
+    if !step(1, "Reading the model file") {
+        return Err(STOPPED.into());
+    }
     let model = yard_import::read(file_name, bytes).map_err(|e| e.to_string())?;
     let options = Options { longest: choices.longest, solid: choices.solid, shell: choices.shell, up: choices.up, turn: choices.turn % 4, mirror: choices.mirror, smooth: choices.smooth };
+    if !step(2, &format!("Cutting {} triangles into blocks", model.triangles.len())) {
+        return Err(STOPPED.into());
+    }
     let voxels = yard_import::voxelize(&model, &options).map_err(|e| e.to_string())?;
+    if !step(3, &format!("Colouring and shaping {} blocks", voxels.cells.len())) {
+        return Err(STOPPED.into());
+    }
     if voxels.cells.is_empty() {
         return Err("The model came out with no blocks.".to_string());
     }
@@ -111,15 +166,13 @@ pub fn ship_from_model(
             *shape = yard_core::smooth::inside_corner(cell.air, neighbour).and_then(|mask| yard_core::smooth::best_form(mask, open));
         }
     }
+    let mut middle = Block::new(plain, 0, false);
     for (cell, planned) in voxels.cells.iter().zip(shapes) {
         let ty = match cell.colour {
             Some(colour) => *by_colour.entry(colour).or_insert_with(|| matcher.nearest(colour).unwrap_or(plain)),
             None => plain,
         };
         let at = Pos::new(cell.pos[0] as i32 - core[0], cell.pos[1] as i32 - core[1], cell.pos[2] as i32 - core[2]);
-        if at == Pos::new(0, 0, 0) {
-            continue;
-        }
         let mut block = Block::new(ty, 0, false);
         if let Some(form) = planned {
             // A block of the shape in the colour's own family, or the whole block.
@@ -127,6 +180,11 @@ pub fn ship_from_model(
                 block = Block::new(shaped_ty, form.orientation, false);
                 shaped += 1;
             }
+        }
+        if at == Pos::new(0, 0, 0) {
+            // The core's cell: the ship keeps its core there.
+            middle = block;
+            continue;
         }
         entity.set(at, block);
     }
@@ -140,5 +198,5 @@ pub fn ship_from_model(
         notes.push(format!("Smoothed: {shaped} blocks are wedges, corners and the like."));
     }
     notes.push(format!("Made of {} blocks, {} by {} by {}.", voxels.cells.len(), voxels.size[0], voxels.size[1], voxels.size[2]));
-    Ok((bp, notes))
+    Ok((bp, notes, middle))
 }

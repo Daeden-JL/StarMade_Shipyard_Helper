@@ -134,6 +134,11 @@ pub struct Summary {
     /// open sees the number change and loads it again. Kept by the server.
     #[serde(default)]
     pub epoch: u64,
+    /// The main entity's kind as its header gives it: 0 a ship, 2 a space
+    /// station (see `convert`). None in summaries stored before it was kept,
+    /// until the server fills it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_type: Option<i32>,
     /// Filled in by the server when it answers, once a game server has ever
     /// connected; not part of what is stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -187,6 +192,7 @@ impl Summary {
             modified: 0,
             print: String::new(),
             epoch: 0,
+            entity_type: Some(bp.root.header.entity_type),
             sync: None,
         }
     }
@@ -335,12 +341,159 @@ pub struct Restructured {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NewDesign {
     pub name: String,
+    /// A space station instead of a ship.
+    #[serde(default)]
+    pub station: bool,
+}
+
+/// Turning a design into the other kind of entity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConvertRequest {
+    pub rev: u64,
+    /// What it is to become: "ship" or "station".
+    pub to: String,
 }
 
 /// A new name for a design.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rename {
     pub name: String,
+}
+
+/// A smoothing pass over a whole entity, run on the server.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SmoothRequest {
+    pub rev: u64,
+    /// Which entity: "" for the main one, "ATTACHED_0"... for docked ones.
+    pub entity: String,
+    pub step: u8,
+    pub inside: bool,
+    pub sharpen: bool,
+    /// Every shaped hull block made whole again first, then the pass.
+    #[serde(default)]
+    pub again: bool,
+}
+
+/// A long piece of work the server has started; ask `/api/jobs/<job>` how it goes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JobStarted {
+    pub job: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Running,
+    Done,
+    Failed,
+    Stopped,
+}
+
+/// How a long piece of work is going.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JobStatus {
+    pub state: JobState,
+    /// What it is doing now, in words.
+    pub what: String,
+    /// Which of its steps it is at: the `stage`th of `stages`, counting
+    /// from 1 (0 of 0 before it has said).
+    #[serde(default)]
+    pub stage: u32,
+    #[serde(default)]
+    pub stages: u32,
+    /// How far it has got with that: `done` of `total` (0 total: no telling).
+    pub done: u64,
+    pub total: u64,
+    /// Seconds since it started.
+    pub seconds: f64,
+    /// Once it has ended: what came of it, in words.
+    #[serde(default)]
+    pub message: String,
+    /// Once it is done: the design's revision with the work in it, and the
+    /// undo history of the entity it worked on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<u64>,
+    #[serde(default)]
+    pub undo: usize,
+    #[serde(default)]
+    pub redo: usize,
+    /// Once it is done, for work that made a design: that design.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design: Option<String>,
+}
+
+/// A blueprint or another design read to take something from: its hull
+/// blocks as a piece, or a turret to dock. Kept by the job named.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceRead {
+    pub job: String,
+    pub name: String,
+    /// Blocks of its main entity besides a ship core.
+    pub blocks: u64,
+    pub dockable: Vec<DockableInfo>,
+}
+
+/// Something [`SourceRead`] can dock: "" for the blueprint itself (a turret
+/// saved on its own), else a docked entity of it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DockableInfo {
+    pub path: String,
+    /// Its blocks and those of everything docked to it.
+    pub blocks: u64,
+    /// Entities docked to it, which come with it.
+    pub docked: usize,
+    /// Whether it hangs from a turret axis.
+    pub turret: bool,
+    /// The kind of rail block it hangs from.
+    #[serde(default)]
+    pub rail_ty: u16,
+}
+
+/// Docking an entity of a blueprint read before (see [`SourceRead`]) into
+/// the design: in place of a docked entity, or on a new rail.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DockFromRequest {
+    pub rev: u64,
+    pub job: String,
+    pub path: String,
+    #[serde(default)]
+    pub replace: Option<String>,
+    #[serde(default)]
+    pub parent: Option<String>,
+    #[serde(default)]
+    pub at: Option<[i32; 3]>,
+    #[serde(default)]
+    pub facing: Option<[i32; 3]>,
+}
+
+/// Locking a piece made from a model into an entity of a design.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MergeRequest {
+    pub rev: u64,
+    /// Which entity: "" for the main one, "ATTACHED_0"... for docked ones.
+    pub entity: String,
+    /// The job that made the piece.
+    pub piece: String,
+    pub fit: crate::merge::Fit,
+    /// Where the piece and the design overlap: the piece's blocks (true)
+    /// or the design's (false).
+    #[serde(default)]
+    pub replace: bool,
+}
+
+/// A piece locked in: one step, which Undo takes back.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MergeDone {
+    pub rev: u64,
+    pub undo: usize,
+    pub redo: usize,
+    /// Blocks the piece wrote.
+    pub written: u64,
+    /// Blocks of the piece left out where the design already had one.
+    pub kept_back: u64,
+    /// Links the piece brought (a blueprint's weapon groups...).
+    #[serde(default)]
+    pub linked: u64,
 }
 
 /// Name of the response header that carries a design file's revision.

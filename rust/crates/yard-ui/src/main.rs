@@ -256,6 +256,34 @@ fn App() -> impl IntoView {
             ev.prevent_default();
             return ctx.stop_looking();
         }
+        // A model being placed: the movement keys move it, not the view.
+        if ctx.placing.get_untracked().is_some() && !(ev.ctrl_key() || ev.meta_key() || ev.alt_key()) {
+            let code = ev.code();
+            let handled = match code.as_str() {
+                "Enter" => {
+                    ctx.lock_piece();
+                    true
+                }
+                "Escape" => {
+                    ctx.cancel_piece();
+                    ctx.say("Placing the model was called off; nothing was changed.");
+                    true
+                }
+                "KeyR" => {
+                    ctx.turn_piece(0, ev.shift_key());
+                    true
+                }
+                "KeyW" | "KeyA" | "KeyS" | "KeyD" | "KeyE" | "KeyQ" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "PageUp" | "PageDown" => {
+                    ctx.nudge_piece(&code, ev.shift_key());
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                ev.prevent_default();
+                return;
+            }
+        }
         // Choosing a new place for the core: the movement keys move it, not
         // the view. While the move is previewed they fly the view again, and
         // Escape goes back to choosing.
@@ -371,16 +399,38 @@ fn App() -> impl IntoView {
     let large = move || size.get() > 512;
     let shell = RwSignal::new(1u8);
     let importing = RwSignal::new(false);
+    let as_station = RwSignal::new(false);
+    // The model goes into the design on screen rather than becoming a design of its own.
+    let into = RwSignal::new(false);
     let do_import = move || {
         let Some((name, bytes)) = import.get_untracked() else { return };
-        let choices = api::ImportChoices { longest: size.get_untracked(), solid: solid.get_untracked(), shell: shell.get_untracked(), up: up.get_untracked(), turn: quarter.get_untracked(), mirror: mirror.get_untracked(), smooth: false, step: 0 };
+        if into.get_untracked() {
+            let choices = api::ImportChoices { longest: size.get_untracked(), solid: solid.get_untracked(), shell: shell.get_untracked(), up: up.get_untracked(), turn: quarter.get_untracked(), mirror: mirror.get_untracked(), smooth: false, step: 0, station: false };
+            import.set(None);
+            ctx.add_piece(work::PieceFrom::Model { name, bytes, choices });
+            return;
+        }
+        let choices = api::ImportChoices { longest: size.get_untracked(), solid: solid.get_untracked(), shell: shell.get_untracked(), up: up.get_untracked(), turn: quarter.get_untracked(), mirror: mirror.get_untracked(), smooth: false, step: 0, station: as_station.get_untracked() };
         importing.set(true);
+        let station = choices.station;
         spawn_local(async move {
-            match api::import_model(&name, &bytes, &choices).await {
-                Ok(done) => {
+            match api::start_import(&name, &bytes, &choices).await {
+                Ok(started) => {
+                    // The dialog makes way for the progress bar.
+                    importing.set(false);
                     import.set(None);
-                    ctx.refresh_designs();
-                    ctx.open_design_noting(done.summary.id, done.notes.join(" "));
+                    ctx.job_starting(if station { "Making the station" } else { "Making the ship" });
+                    ctx.follow_job(started.job, move |status| {
+                        use yard_core::api::JobState;
+                        match (status.state, status.design) {
+                            (JobState::Done, Some(design)) => {
+                                ctx.refresh_designs();
+                                ctx.open_design_noting(design, status.message);
+                            }
+                            (JobState::Failed, _) => ctx.fail(status.message),
+                            _ => ctx.say(status.message),
+                        }
+                    });
                 }
                 Err(e) => ctx.fail(e),
             }
@@ -389,6 +439,75 @@ fn App() -> impl IntoView {
     };
 
 
+    // A blueprint or design read to take something from, when it has turrets
+    // to dock as well as hull blocks to place: the player chooses which.
+    let choosing = RwSignal::new(None::<yard_core::api::SourceRead>);
+    let took_source = move |read: yard_core::api::SourceRead| {
+        if read.dockable.is_empty() {
+            ctx.add_piece(work::PieceFrom::Source(read.job));
+        } else {
+            choosing.set(Some(read));
+        }
+    };
+    let pick_design = move |from: String| {
+        let Some(summary) = ctx.current.get_untracked() else { return };
+        ctx.say("Reading the design...");
+        spawn_local(async move {
+            match api::read_source_design(&summary.id, &from).await {
+                Ok(read) => {
+                    ctx.say("");
+                    took_source(read);
+                }
+                Err(e) => ctx.fail(e),
+            }
+        });
+    };
+    // A 3D model to cut into blocks, or a blueprint, to place in the design on screen.
+    let on_piece_file = move |ev: leptos::ev::Event| {
+        let input: HtmlInputElement = event_target(&ev);
+        let Some(file) = input.files().and_then(|f| f.get(0)) else { return };
+        input.set_value("");
+        let name = file.name();
+        spawn_local(async move {
+            let bytes = match wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+                Ok(buffer) => js_sys::Uint8Array::new(&buffer).to_vec(),
+                Err(_) => return ctx.fail(format!("Could not read {name} from disk.")),
+            };
+            let lower = name.to_lowercase();
+            // A blueprint goes straight on screen. A zip may be one, or a
+            // model with its textures: tried as a blueprint first.
+            if lower.ends_with(".sment") || lower.ends_with(".zip") {
+                let Some(summary) = ctx.current.get_untracked() else { return };
+                ctx.say(format!("Reading {name}..."));
+                match api::read_source_file(&summary.id, &name, &bytes).await {
+                    Ok(read) => {
+                        ctx.say("");
+                        took_source(read);
+                    }
+                    Err(e) if lower.ends_with(".zip") && e.contains("could not be read as a blueprint") => {
+                        ctx.say("");
+                        into.set(true);
+                        import.set(Some((name, bytes)));
+                    }
+                    Err(e) => ctx.fail(e),
+                }
+                return;
+            }
+            into.set(true);
+            import.set(Some((name, bytes)));
+        });
+    };
+    // Choosing another saved design to place in the design on screen.
+    let picking = RwSignal::new(false);
+    let pick_filter = RwSignal::new(String::new());
+    let pickable = Memo::new(move |_| {
+        let needle = pick_filter.get().trim().to_lowercase();
+        let mut list: Vec<Summary> = ctx.designs.get().into_iter().filter(|d| needle.is_empty() || d.name.to_lowercase().contains(&needle)).collect();
+        list.sort_by_cached_key(|d| d.name.to_lowercase());
+        let more = list.len().saturating_sub(DESIGN_ROWS);
+        list.truncate(DESIGN_ROWS);
+        (list, more)
+    });
     let on_file = move |ev: leptos::ev::Event| {
         let input: HtmlInputElement = event_target(&ev);
         let Some(file) = input.files().and_then(|f| f.get(0)) else { return };
@@ -411,6 +530,7 @@ fn App() -> impl IntoView {
             let model = !lower.ends_with(".sment");
             if model && !lower.ends_with(".zip") {
                 ctx.say("");
+                into.set(false);
                 import.set(Some((name, bytes)));
                 return;
             }
@@ -428,14 +548,14 @@ fn App() -> impl IntoView {
         });
     };
 
-    let create = move || {
+    let create = move |station: bool| {
         let name = new_name.get_untracked().trim().to_string();
         if name.is_empty() {
-            ctx.fail("Type a name for the new ship first.");
+            ctx.fail(if station { "Type a name for the new station first." } else { "Type a name for the new ship first." });
             return;
         }
         spawn_local(async move {
-            match api::new_design(&name).await {
+            match api::new_design(&name, station).await {
                 Ok(summary) => {
                     new_name.set(String::new());
                     ctx.refresh_designs();
@@ -614,10 +734,99 @@ fn App() -> impl IntoView {
                     </div>
                 </div>
             </Show>
+            <Show when=move || choosing.get().is_some()>
+                <div class="dialog-back" on:click=move |_| choosing.set(None)>
+                    <div class="dialog" on:click=|ev| ev.stop_propagation()>
+                        {move || choosing.get().map(|read| {
+                            let name = read.name.clone();
+                            let job = read.job.clone();
+                            let hull = read.blocks;
+                            let piece_job = job.clone();
+                            view! {
+                                <h2>{format!("What to take from {name}?")}</h2>
+                                <p class="empty">"A turret is docked onto a new turret axis, with its barrels, links and AI settings: click where the axis goes, preview it, then confirm. Its hull blocks are placed like a model, and locked in."</p>
+                                <ul class="pick-list">
+                                    {read.dockable.into_iter().map(|d| {
+                                        let kind = if d.turret { "Turret" } else { "Docked entity" };
+                                        let number = d.path.strip_prefix("ATTACHED_").and_then(|n| n.parse::<u32>().ok()).map_or(String::new(), |n| format!(" {}", n + 1));
+                                        let (title, label) = if d.path.is_empty() {
+                                            (format!("{name}, as a turret"), name.clone())
+                                        } else {
+                                            (format!("{kind}{number}"), format!("{}{number} of {name}", kind.to_lowercase()))
+                                        };
+                                        let with = match d.docked {
+                                            0 => String::new(),
+                                            1 => ", with 1 docked part".to_string(),
+                                            n => format!(", with {n} docked parts"),
+                                        };
+                                        let outside = work::Outside { job: job.clone(), path: d.path.clone(), label, rail_ty: d.rail_ty };
+                                        view! {
+                                            <li>
+                                                <button on:click=move |_| { choosing.set(None); ctx.start_docking(outside.clone()); }>
+                                                    {title}
+                                                    <span class="empty">{format!(" {} blocks{with}: dock it", thousands(d.blocks))}</span>
+                                                </button>
+                                            </li>
+                                        }
+                                    }).collect_view()}
+                                    <Show when=move || { hull > 0 }>
+                                        {
+                                            let piece_job = piece_job.clone();
+                                            view! {
+                                                <li>
+                                                    <button on:click=move |_| { choosing.set(None); ctx.add_piece(work::PieceFrom::Source(piece_job.clone())); }>
+                                                        "Its hull blocks"
+                                                        <span class="empty">{format!(" {} blocks, without turrets or core: place them", thousands(hull))}</span>
+                                                    </button>
+                                                </li>
+                                            }
+                                        }
+                                    </Show>
+                                </ul>
+                                <div class="row">
+                                    <button class="current" on:click=move |_| choosing.set(None)>"Cancel"</button>
+                                </div>
+                            }
+                        })}
+                    </div>
+                </div>
+            </Show>
+            <Show when=move || picking.get()>
+                <div class="dialog-back" on:click=move |_| picking.set(false)>
+                    <div class="dialog" on:click=|ev| ev.stop_propagation()>
+                        <h2>"Add a saved design"</h2>
+                        <p class="empty">"Its hull blocks are put above the entity on screen, with their links (weapon groups and the like), to move into place and lock in. If it has turrets, or is a turret, you can choose to dock one onto a new turret axis instead."</p>
+                        <input type="search" placeholder="Filter by name" prop:value=move || pick_filter.get() on:input=move |ev| pick_filter.set(event_target_value(&ev))/>
+                        <ul class="pick-list">
+                            {move || pickable.get().0.into_iter().map(|d| {
+                                let id = d.id.clone();
+                                let kind = if d.entity_type == Some(yard_core::convert::STATION) { "station" } else { "ship" };
+                                view! {
+                                    <li>
+                                        <button on:click=move |_| { picking.set(false); pick_design(id.clone()); }>
+                                            {d.name.clone()}
+                                            <span class="empty">{format!(" {kind}, {} blocks", thousands(d.blocks))}</span>
+                                        </button>
+                                    </li>
+                                }
+                            }).collect_view()}
+                        </ul>
+                        <Show when=move || { pickable.get().1 > 0 }>
+                            <p class="empty">{move || format!("{} more; type to narrow the list.", pickable.get().1)}</p>
+                        </Show>
+                        <div class="row">
+                            <button class="current" on:click=move |_| picking.set(false)>"Cancel"</button>
+                        </div>
+                    </div>
+                </div>
+            </Show>
             <Show when=move || import.get().is_some()>
                 <div class="dialog-back">
                     <div class="dialog">
-                        <h2>"Make a ship from a 3D model"</h2>
+                        <h2>{move || if into.get() { "Add a 3D model to the design" } else if as_station.get() { "Make a station from a 3D model" } else { "Make a ship from a 3D model" }}</h2>
+                        <Show when=move || into.get()>
+                            <p class="empty">"It is cut into blocks and put above the entity on screen. Move it into place there, then lock it in; until then nothing changes."</p>
+                        </Show>
                         <p class="empty">
                             {move || import.get().map(|(name, bytes)| format!("{name}, {} KB. The model is cut into blocks, coloured with the nearest hull colour.", bytes.len() / 1024)).unwrap_or_default()}
                         </p>
@@ -676,9 +885,13 @@ fn App() -> impl IntoView {
                             <input type="checkbox" prop:checked=move || mirror.get() on:change=move |ev| mirror.set(event_target_checked(&ev))/>
                             "Swap left and right"
                         </label>
+                        <label class="check" class:hidden=move || into.get() title="A station has no core and stays where it is put; the game spawns it with the stations">
+                            <input type="checkbox" prop:checked=move || as_station.get() on:change=move |ev| as_station.set(event_target_checked(&ev))/>
+                            "Make a station instead of a ship"
+                        </label>
                         <div class="row">
                             <button class="current" disabled=move || importing.get() on:click=move |_| do_import()>
-                                {move || if importing.get() { "Working..." } else { "Make the ship" }}
+                                {move || if importing.get() { "Working..." } else if into.get() { "Cut it out and place it" } else if as_station.get() { "Make the station" } else { "Make the ship" }}
                             </button>
                             <button disabled=move || importing.get() on:click=move |_| import.set(None)>"Cancel"</button>
                         </div>
@@ -687,16 +900,23 @@ fn App() -> impl IntoView {
             </Show>
             <header class="bar">
                 <h1>"Shipyard"</h1>
-                <input class="name" type="text" placeholder="New ship name" maxlength="48"
+                <input class="name" type="text" placeholder="New design name" maxlength="48"
                        prop:value=move || new_name.get()
                        on:input=move |ev| new_name.set(event_target_value(&ev))
-                       on:keydown=move |ev: leptos::ev::KeyboardEvent| if ev.key() == "Enter" { create() }/>
-                <button on:click=move |_| create()>"New ship"</button>
+                       on:keydown=move |ev: leptos::ev::KeyboardEvent| if ev.key() == "Enter" { create(false) }/>
+                <button title="A new ship: just its core" on:click=move |_| create(false)>"New ship"</button>
+                <button title="A new space station: a Build Block to build from, as in the game" on:click=move |_| create(true)>"New station"</button>
                 <label class="button">
                     "Upload blueprint or 3D model"
                     <input type="file" on:change=on_file/>
                 </label>
                 <Show when=move || current.get().is_some()>
+                    <label class="button" title="Place a blueprint (.sment) or a 3D model (cut into blocks) in the entity on screen: move it, turn it, then lock it in">
+                        "Add a blueprint or model"
+                        <input type="file" on:change=on_piece_file/>
+                    </label>
+                    <button title="Place the main entity of one of the designs here in the entity on screen: move it, turn it, then lock it in"
+                            on:click=move |_| { pick_filter.set(String::new()); picking.set(true); }>"Add a saved design"</button>
                     <a class="button" download
                        href=move || current.get().map(|s| format!("/api/designs/{}/file", s.id)).unwrap_or_default()>
                         "Download .sment"
@@ -717,6 +937,8 @@ fn App() -> impl IntoView {
                 </span>
                 <span class="status" class:error=move || status.get().1 title=move || status.get().0>{move || status.get().0}</span>
             </header>
+            <JobBar ctx/>
+            <PiecePanel ctx/>
             <div class="main">
                 <aside class="side">
                     <Show when=move || current.get().is_some()>
@@ -725,7 +947,7 @@ fn App() -> impl IntoView {
                     <div class="designs">
                         <h2>"Designs"</h2>
                         <Show when=move || designs.get().is_empty()>
-                            <p class="empty">"Nothing here yet. Start a new ship or upload a blueprint."</p>
+                            <p class="empty">"Nothing here yet. Start a new ship or station, or upload a blueprint."</p>
                         </Show>
                         <Show when=move || { designs.with(|d| d.len() > 8) }>
                             <input class="search" type="search" placeholder="Filter designs"
@@ -742,6 +964,7 @@ fn App() -> impl IntoView {
                                             on:click=move |_| ctx.open_design(id.clone(), true)>
                                         {d.name.clone()}
                                         <small>
+                                            {(d.entity_type == Some(yard_core::convert::STATION)).then_some("Station, ")}
                                             {thousands(d.blocks)} " blocks"
                                             {d.sync.map(|s| view! {
                                                 <span class="sync" class:waiting=s == SyncStatus::Waiting
@@ -895,6 +1118,168 @@ fn YardPicker(ctx: Ctx, yards: Vec<yard_core::api::GameYard>) -> impl IntoView {
 /// The side panel for the open design: its entities, block totals and warnings.
 /// It stays in place while the design changes under it, so what is unfolded
 /// or scrolled to stays so through every edit.
+/// How far the work the server is doing for the page has got, with a way to stop it.
+#[component]
+fn JobBar(ctx: Ctx) -> impl IntoView {
+    let status = move || ctx.job.with(|j| j.as_ref().and_then(|j| j.status.clone()));
+    let fraction = move || status().filter(|s| s.total > 0).map(|s| (s.done as f64 / s.total as f64).clamp(0.0, 1.0));
+    view! {
+        <Show when=move || ctx.job.with(Option::is_some)>
+            <div class="job" role="status">
+                <div class="job-line">
+                    <strong>{move || ctx.job.with(|j| j.as_ref().map(|j| j.title.clone()).unwrap_or_default())}</strong>
+                    <span class="job-steps" title="Which step the work is at, and how many there are">{move || status().and_then(|s| steps_line(s.stage, s.stages))}</span>
+                </div>
+                <div class="job-line">
+                    <span>{move || status().map(|s| s.what).unwrap_or_else(|| "Starting...".into())}</span>
+                </div>
+                <div class="job-track" class:unknown=move || fraction().is_none()>
+                    <div class="job-fill" style:width=move || fraction().map_or("30%".to_string(), |f| format!("{:.1}%", f * 100.0))></div>
+                </div>
+                <div class="job-line">
+                    <small>
+                        {move || fraction().map(|f| format!("{:.0}%", f * 100.0)).unwrap_or_default()}
+                        {move || status().filter(|s| s.total > 0).map(|s| format!(" ({} of {} blocks)", thousands(s.done), thousands(s.total))).unwrap_or_default()}
+                        {move || status().map(|s| format!(", {:.0} s", s.seconds)).unwrap_or_default()}
+                    </small>
+                    <button disabled=move || ctx.job.with(|j| j.as_ref().is_none_or(|j| j.id.is_none()))
+                            title="Stop the work; nothing is changed"
+                            on:click=move |_| ctx.stop_job()>"Stop"</button>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+/// Moving a piece made from a 3D model into place, and locking it in.
+#[component]
+fn PiecePanel(ctx: Ctx) -> impl IntoView {
+    let placing = move || ctx.placing.get();
+    let fit = move || placing().map(|p| p.fit).unwrap_or_default();
+    let axis_input = move |axis: usize| {
+        view! {
+            <input type="number" class="piece-at"
+                   prop:value=move || fit().at[axis].to_string()
+                   on:change=move |ev| {
+                       if let Ok(v) = event_target_value(&ev).trim().parse::<i32>() {
+                           ctx.set_piece_at(axis, v);
+                       }
+                   }/>
+        }
+    };
+    let nudge = move |label: &'static str, title: &'static str, by: [i32; 3]| {
+        view! { <button title=title on:click=move |_| ctx.move_piece(by)>{label}</button> }
+    };
+    view! {
+        <Show when=move || placing().is_some()>
+            <div class="piece" role="dialog" aria-label="Placing a model">
+                <div class="piece-row">
+                    <strong>"Placing the model"</strong>
+                    <small>{move || placing().map(|p| format!("{} blocks", thousands(p.blocks))).unwrap_or_default()}</small>
+                </div>
+                <div class="piece-row">
+                    <span class="piece-label">"At"</span>
+                    "X" {axis_input(0)} "Y" {axis_input(1)} "Z" {axis_input(2)}
+                </div>
+                <div class="piece-row">
+                    <span class="piece-label">"Move"</span>
+                    {nudge("X−", "Toward -X (left)", [-1, 0, 0])}{nudge("X+", "Toward +X (right)", [1, 0, 0])}
+                    {nudge("Y−", "Down", [0, -1, 0])}{nudge("Y+", "Up", [0, 1, 0])}
+                    {nudge("Z−", "Toward the back", [0, 0, -1])}{nudge("Z+", "Toward the front", [0, 0, 1])}
+                    <select title="How far one press moves it" on:change=move |ev| ctx.piece_step(event_target_value(&ev).parse().unwrap_or(1))>
+                        <option value="1" selected=move || placing().is_some_and(|p| p.step == 1)>"1 block"</option>
+                        <option value="5" selected=move || placing().is_some_and(|p| p.step == 5)>"5 blocks"</option>
+                        <option value="10" selected=move || placing().is_some_and(|p| p.step == 10)>"10 blocks"</option>
+                    </select>
+                </div>
+                <div class="piece-row">
+                    <span class="piece-label">"Turn"</span>
+                    <button title="A quarter turn to the left, about the up axis (Shift+R)" on:click=move |_| ctx.turn_piece(0, true)>"⟲ Left"</button>
+                    <button title="A quarter turn to the right, about the up axis (R)" on:click=move |_| ctx.turn_piece(0, false)>"⟳ Right"</button>
+                    <button title="A quarter turn nose down" on:click=move |_| ctx.turn_piece(1, false)>"Nose down"</button>
+                    <button title="A quarter turn nose up" on:click=move |_| ctx.turn_piece(1, true)>"Nose up"</button>
+                    <button title="A quarter roll to the left" on:click=move |_| ctx.turn_piece(2, false)>"Roll ⟲"</button>
+                    <button title="A quarter roll to the right" on:click=move |_| ctx.turn_piece(2, true)>"Roll ⟳"</button>
+                </div>
+                <div class="piece-row">
+                    <label class="check">
+                        <input type="checkbox" prop:checked=move || fit().mirror on:change=move |ev| ctx.mirror_piece(event_target_checked(&ev))/>
+                        "Mirror (swap left and right)"
+                    </label>
+                </div>
+                <div class="piece-row">
+                    <span class="piece-label">"Overlap"</span>
+                    <label class="check" title="Where the model and the design both have a block, the design's stays">
+                        <input type="radio" name="piece-overlap" prop:checked=move || placing().is_some_and(|p| !p.replace) on:change=move |_| ctx.piece_replaces(false)/>
+                        "Keep the design's blocks"
+                    </label>
+                    <label class="check" title="Where the model and the design both have a block, the model's takes its place (never the core)">
+                        <input type="radio" name="piece-overlap" prop:checked=move || placing().is_some_and(|p| p.replace) on:change=move |_| ctx.piece_replaces(true)/>
+                        "The model's blocks win"
+                    </label>
+                </div>
+                <p class="empty note">"Movement keys (W A S D, arrows, Q E, Page Up/Down) move it from where you look, Shift for 10 at a time; R turns it. Enter locks it in, Esc calls it off."</p>
+                <div class="piece-row">
+                    <button class="current" title="Join it to the design: one step, which Undo takes back (Enter)" on:click=move |_| ctx.lock_piece()>"Lock it in"</button>
+                    <button title="Take it away; nothing is changed (Esc)" on:click=move |_| {
+                        ctx.cancel_piece();
+                        ctx.say("Placing the model was called off; nothing was changed.");
+                    }>"Cancel"</button>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
+/// "Step 3 of 7, 4 to go" for a progress bar; nothing before the work has said.
+fn steps_line(stage: u32, stages: u32) -> Option<String> {
+    if stage == 0 || stages == 0 {
+        return None;
+    }
+    let stage = stage.min(stages);
+    let left = stages - stage;
+    Some(match left {
+        0 => format!("Step {stage} of {stages}, the last"),
+        1 => format!("Step {stage} of {stages}, 1 to go"),
+        n => format!("Step {stage} of {stages}, {n} to go"),
+    })
+}
+
+/// What kind of entity the open design is, and turning it into the other.
+#[component]
+fn ConvertKind(ctx: Ctx) -> impl IntoView {
+    let station = Memo::new(move |_| ctx.current.with(|c| c.as_ref().and_then(|s| s.entity_type)) == Some(yard_core::convert::STATION));
+    view! {
+        <Show when=move || ctx.converting.get()
+              fallback=move || view! {
+                  <div class="row">
+                      <span class="empty">{move || if station.get() { "Space station" } else { "Ship" }}</span>
+                      <button class="link" title="Turn this design into the other kind of entity"
+                              on:click=move |_| ctx.converting.set(true)>
+                          {move || if station.get() { "Make it a ship..." } else { "Make it a station..." }}
+                      </button>
+                  </div>
+              }>
+            <div class="rename">
+                <p class="empty note">
+                    {move || if station.get() {
+                        "A ship core goes at the centre of the station, in place of any block there; move it afterwards with the Move core tool (8). Blocks that only work on stations stay, but do nothing on a ship."
+                    } else {
+                        "The ship core gives way to a Build Block, which a station is built from, and its links go with it. Thrusters and other blocks that only work on ships stay, but do nothing on a station."
+                    }}
+                    " Undo cannot follow this; \"Put back as it was\" can, until the next edit."
+                </p>
+                <div class="row">
+                    <button class="current" on:click=move |_| ctx.convert_design(if station.get_untracked() { "ship" } else { "station" })>
+                        {move || if station.get() { "Make it a ship" } else { "Make it a station" }}
+                    </button>
+                    <button on:click=move |_| ctx.converting.set(false)>"Cancel"</button>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
 #[component]
 fn DesignInfo(ctx: Ctx) -> impl IntoView {
     let id = Memo::new(move |_| ctx.current.with(|c| c.as_ref().map(|s| s.id.clone()).unwrap_or_default()));
@@ -948,6 +1333,9 @@ fn DesignInfo(ctx: Ctx) -> impl IntoView {
                     </div>
                     <p class="empty note">"Letters, digits, spaces, - and _. The game cannot rename a blueprint: one it has under the old name stays there, and this design goes to the game under the new one."</p>
                 </form>
+            </Show>
+            <Show when=move || matches!(of(ctx, |s| s.entity_type), Some(yard_core::convert::SHIP | yard_core::convert::STATION))>
+                <ConvertKind ctx/>
             </Show>
             {move || of(ctx, |s| s.warnings.clone()).into_iter().map(|w| view! { <p class="warning">{w}</p> }).collect_view()}
             <Show when=move || !ctx.versions.get().is_empty()>

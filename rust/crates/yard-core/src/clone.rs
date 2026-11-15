@@ -144,6 +144,20 @@ fn count_below(e: &BlueprintEntity) -> (usize, u64) {
     })
 }
 
+/// What is copied: an entity with everything docked to it, and how it sits
+/// on a rail.
+struct Source {
+    entity: BlueprintEntity,
+    /// Its docker block, in its own coordinates.
+    docker: DockPiece,
+    /// The kind of rail it hangs from (a turret axis...), for a new rail.
+    rail_ty: u16,
+    /// Its path, when it is an entity of the design itself.
+    own_path: Option<String>,
+    /// What it is called in notes.
+    label: String,
+}
+
 /// Copies the docked entity at `source`, with everything docked to it, to
 /// `place` (see [`Place`]). Returns the copy's path. Refuses, leaving the
 /// blueprint as it was, a source or target that is not docked, a place that
@@ -151,26 +165,144 @@ fn count_below(e: &BlueprintEntity) -> (usize, u64) {
 /// rests on, and meta files this cannot rewrite. `aid` tells which block
 /// types keep data by position (the block catalog does).
 pub fn clone_docked(bp: &mut Blueprint, aid: &dyn Aid, source: &str, place: &Place) -> Result<Made> {
-    let bp_name = bp.name.clone();
-    let docks = bp.docks();
     if source.is_empty() {
         return Err(refuse("the main entity is docked to nothing; choose a docked entity to copy"));
     }
     let original = bp.entity(source).ok_or_else(|| refuse(format!("there is no entity {source:?}")))?;
-    let dock = docks.get(source).ok_or_else(|| refuse(format!("{} has no dock on record", called(source))))?.clone();
+    let dock = bp.docks().get(source).ok_or_else(|| refuse(format!("{} has no dock on record", called(source))))?.clone();
+    let from = Source { entity: original.clone(), docker: dock.docker, rail_ty: dock.rail.ty, own_path: Some(source.to_string()), label: called(source) };
+    copy_in(bp, aid, from, place)
+}
+
+/// The rail docker of a turret saved on its own: a ship whose docked
+/// entities are not counted, with a rail docker block to sit on an axis by.
+/// The one nearest its core when it has several.
+const RAIL_DOCKER: u16 = 663;
+
+/// The game's blueprint classification of a turret.
+const TURRET_CLASS: i32 = 23;
+
+/// Docks a copy of the entity at `path` of another blueprint (a turret
+/// docked there, or a turret saved as a blueprint of its own when `path` is
+/// "") onto `place` in `bp`, with everything docked to it, as
+/// [`clone_docked`] does with one of the design's own. A blueprint of its
+/// own sits on a new turret axis by its rail docker. Wireless links to
+/// entities that do not come with it are dropped.
+pub fn dock_from(bp: &mut Blueprint, aid: &dyn Aid, other: &Blueprint, path: &str, place: &Place) -> Result<Made> {
+    let entity = other.entity(path).ok_or_else(|| refuse(format!("{} has no entity {path:?}", other.name)))?;
+    let (docker, rail_ty, label) = if path.is_empty() {
+        if entity.header.entity_type != 0 {
+            return Err(refuse(format!("{} is not a ship, and only ships can be docked", other.name)));
+        }
+        let mut best: Option<(i64, Pos, u8)> = None;
+        entity.entity.for_each(|p, b| {
+            if b.ty() == RAIL_DOCKER {
+                let d = (p.x as i64).pow(2) + (p.y as i64).pow(2) + (p.z as i64).pow(2);
+                if best.is_none_or(|(bd, _, _)| d < bd) {
+                    best = Some((d, p, b.orientation()));
+                }
+            }
+        });
+        let (_, pos, orientation) = best.ok_or_else(|| refuse(format!("{} has no rail docker to sit on a turret axis by", other.name)))?;
+        (DockPiece { pos, ty: RAIL_DOCKER, orientation }, TURRET_AXIS, other.name.clone())
+    } else {
+        let dock = other.docks().get(path).cloned().ok_or_else(|| refuse(format!("{} of {} has no dock on record", called(path), other.name)))?;
+        (dock.docker, dock.rail.ty, format!("{} of {}", called(path), other.name))
+    };
+    let mut copy = entity.clone();
+    // A blueprint of its own keeps nothing about where it sat, nor
+    // anything in its header that only a main entity has.
+    if path.is_empty() {
+        copy.header = { let mut h = Blueprint::new_ship(&bp.name, &copy.header.game_version).root.header; h.refresh(&copy.entity); h };
+    }
+    copy_in(bp, aid, Source { entity: copy, docker, rail_ty, own_path: None, label }, place)
+}
+
+/// An entity of a blueprint that [`dock_from`] can dock elsewhere.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dockable {
+    /// "" for the blueprint itself (a turret saved on its own), else a docked entity's path.
+    pub path: String,
+    /// Its blocks and those of everything docked to it.
+    pub blocks: u64,
+    /// How many entities are docked to it, which come with it.
+    pub docked: usize,
+    /// The kind of rail it hangs from (a turret axis for a turret).
+    pub rail_ty: u16,
+}
+
+/// What [`dock_from`] can take from a blueprint: the blueprint itself, if
+/// it is a ship with a rail docker (a turret saved on its own), and each
+/// entity docked to its main entity.
+pub fn dockable(bp: &Blueprint) -> Vec<Dockable> {
+    let mut out = Vec::new();
+    let root = &bp.root;
+    let (mut has_docker, mut thrusters) = (false, false);
+    root.entity.for_each(|_, b| {
+        has_docker |= b.ty() == RAIL_DOCKER;
+        thrusters |= b.ty() == crate::links::id::THRUSTER;
+    });
+    // A turret saved on its own: classed as one, called one, or (as most
+    // are, classed as nothing) a ship with a rail docker and no thrusters.
+    // A fighter that docks to a carrier has thrusters.
+    let turret_like = root.header.classification == TURRET_CLASS || bp.name.to_lowercase().contains("turret") || !thrusters;
+    if root.header.entity_type == 0 && has_docker && turret_like {
+        let (docked, blocks) = count_below(root);
+        out.push(Dockable { path: String::new(), blocks, docked, rail_ty: TURRET_AXIS });
+    }
+    let docks = bp.docks();
+    for child in &root.children {
+        if let Some(dock) = docks.get(&child.dir) {
+            let (docked, blocks) = count_below(child);
+            out.push(Dockable { path: child.dir.clone(), blocks, docked, rail_ty: dock.rail.ty });
+        }
+    }
+    out
+}
+
+/// The blueprint cut down to what docking its entity at `path` needs (see
+/// [`dockable`]): for a docked entity, the main entity's blocks go and only
+/// that docked entity is kept, with its dock record. Smaller to send.
+pub fn trimmed_to(bp: &Blueprint, path: &str) -> Blueprint {
+    if path.is_empty() {
+        return bp.clone();
+    }
+    let root = &bp.root;
+    let mut header = root.header.clone();
+    let entity = crate::Entity::new();
+    header.refresh(&entity);
+    let root = BlueprintEntity {
+        dir: root.dir.clone(),
+        header,
+        entity,
+        meta: root.meta.clone(),
+        modmappings: root.modmappings.clone(),
+        logic_raw: None,
+        logic_unreadable: false,
+        children: root.children.iter().filter(|c| c.dir == path).cloned().collect(),
+    };
+    Blueprint { name: bp.name.clone(), root, warnings: Vec::new(), converted: bp.converted }
+}
+
+fn copy_in(bp: &mut Blueprint, aid: &dyn Aid, from: Source, place: &Place) -> Result<Made> {
+    let bp_name = bp.name.clone();
+    let docks = bp.docks();
+    let original = &from.entity;
     if original.logic_unreadable {
-        return Err(refuse(format!("the links of {} are in a file this editor cannot read", called(source))));
+        return Err(refuse(format!("the links of {} are in a file this editor cannot read", from.label)));
     }
     let (parts, blocks) = count_below(original);
 
     // Where it goes: the rail, in its entity's coordinates, and that entity.
     let (parent_path, rail, replaced_dir): (String, DockPiece, Option<String>) = match place {
         Place::Replace { entity } => {
-            if entity == source {
-                return Err(refuse("an entity cannot take its own place"));
-            }
-            if source.starts_with(&format!("{entity}/")) {
-                return Err(refuse(format!("{} holds {}, so the copy cannot take its place", called(entity), called(source))));
+            if let Some(source) = &from.own_path {
+                if entity == source {
+                    return Err(refuse("an entity cannot take its own place"));
+                }
+                if source.starts_with(&format!("{entity}/")) {
+                    return Err(refuse(format!("{} holds {}, so the copy cannot take its place", called(entity), called(source))));
+                }
             }
             let old = docks.get(entity).ok_or_else(|| refuse(format!("{} has no dock on record", called(entity))))?;
             let (parent, dir) = parent_of(entity).ok_or_else(|| refuse("the main entity cannot be replaced"))?;
@@ -194,7 +326,7 @@ pub fn clone_docked(bp: &mut Blueprint, aid: &dyn Aid, source: &str, place: &Pla
             if !e.entity.get(front).is_air() {
                 return Err(refuse(format!("the cell in front of the rail, ({}, {}, {}) of {}, where the copy's rail docker rests, holds a block", front.x, front.y, front.z, called(parent))));
             }
-            (parent.clone(), DockPiece { pos: *at, ty: dock.rail.ty, orientation: orientation_facing(*facing) }, None)
+            (parent.clone(), DockPiece { pos: *at, ty: from.rail_ty, orientation: orientation_facing(*facing) }, None)
         }
     };
     let parent = bp.entity(&parent_path).ok_or_else(|| refuse(format!("there is no entity {parent_path:?}")))?;
@@ -202,7 +334,8 @@ pub fn clone_docked(bp: &mut Blueprint, aid: &dyn Aid, source: &str, place: &Pla
     let parent_name = parent_meta.rails().map_or(String::new(), |r| r.name.clone());
 
     // The copy, named afresh throughout.
-    let mut copy = original.clone();
+    let docker = from.docker;
+    let mut copy = from.entity;
     let mut taken = names_in(bp);
     let mut removed_names = BTreeSet::new();
     if let Some(dir) = &replaced_dir {
@@ -242,7 +375,28 @@ pub fn clone_docked(bp: &mut Blueprint, aid: &dyn Aid, source: &str, place: &Pla
         }
     }
     rename_wireless(&mut copy, &renamed);
-    let record = new_record(&bp_name, &parent_name, &rail, &name, &dock.docker).write();
+    // Copied from another blueprint, links to what stayed there go.
+    let mut lost_wireless = 0;
+    if from.own_path.is_none() {
+        fn keep_inside(e: &mut BlueprintEntity, inside: &BTreeSet<String>, lost: &mut usize) {
+            if let Ok(mut meta) = MetaFile::parse(&e.meta) {
+                if let Some(rails) = meta.rails_mut() {
+                    let before = rails.wireless.len();
+                    rails.wireless.retain(|pair| inside.contains(&pair.entity));
+                    if rails.wireless.len() != before {
+                        *lost += before - rails.wireless.len();
+                        e.meta = meta.write();
+                    }
+                }
+            }
+            for c in &mut e.children {
+                keep_inside(c, inside, lost);
+            }
+        }
+        let inside: BTreeSet<String> = renamed.values().cloned().collect();
+        keep_inside(&mut copy, &inside, &mut lost_wireless);
+    }
+    let record = new_record(&bp_name, &parent_name, &rail, &name, &docker).write();
 
     // Nothing can fail from here on.
     let mut notes = Vec::new();
@@ -335,13 +489,13 @@ pub fn clone_docked(bp: &mut Blueprint, aid: &dyn Aid, source: &str, place: &Pla
         match place {
             Place::Replace { entity } => format!(
                 "Copied {} as {child_path}: {blocks} blocks{}, in place of {}, which was removed with what was docked to it; the copy hangs from the {rail_name} it hung from.",
-                called(source),
+                from.label,
                 if parts > 0 { format!(" with {parts} docked {}", if parts == 1 { "entity" } else { "entities" }) } else { String::new() },
                 called(entity)
             ),
             Place::New { .. } => format!(
                 "Copied {} as {child_path}: {blocks} blocks{}, on a new {rail_name} at ({}, {}, {}) of {}{}.",
-                called(source),
+                from.label,
                 if parts > 0 { format!(" with {parts} docked {}", if parts == 1 { "entity" } else { "entities" }) } else { String::new() },
                 rail.pos.x,
                 rail.pos.y,
@@ -351,6 +505,9 @@ pub fn clone_docked(bp: &mut Blueprint, aid: &dyn Aid, source: &str, place: &Pla
             ),
         },
     );
+    if lost_wireless > 0 {
+        notes.push(format!("{lost_wireless} wireless {} to entities that did not come with it {} dropped.", if lost_wireless == 1 { "link" } else { "links" }, if lost_wireless == 1 { "was" } else { "were" }));
+    }
     if dropped_parts > 0 {
         notes.push(format!("{dropped_parts} docked {} of the original had no dock on record and {} left out of the copy.", if dropped_parts == 1 { "entity" } else { "entities" }, if dropped_parts == 1 { "was" } else { "were" }));
     }
@@ -432,6 +589,21 @@ mod tests {
             let parent = path.rsplit_once('/').map_or("", |(p, _)| p);
             assert_eq!(bp.entity(parent).unwrap().entity.get(dock.rail.pos).ty(), dock.rail.ty, "{path}: the rail block is where its record says");
             assert_eq!(bp.entity(&path).unwrap().entity.get(dock.docker.pos).ty(), dock.docker.ty, "{path}: the docker block is where its record says");
+        }
+    }
+
+    trait FindType {
+        fn for_each_find(&self, ty: u16) -> Pos;
+    }
+    impl FindType for crate::Entity {
+        fn for_each_find(&self, ty: u16) -> Pos {
+            let mut at = None;
+            self.for_each(|p, b| {
+                if b.ty() == ty && at.is_none() {
+                    at = Some(p);
+                }
+            });
+            at.expect("a block of that type")
         }
     }
 
@@ -529,5 +701,69 @@ mod tests {
             assert!(err.contains(why), "{source} {place:?}: {err}");
         }
         assert_eq!(bp.to_files().unwrap(), before);
+    }
+
+    #[test]
+    fn a_turret_of_another_design_is_docked_onto_a_new_axis_with_its_barrel() {
+        let catalog = catalog();
+        let other = with_turret_and_barrel();
+        let mut bp = ship(&[(Pos::new(-6, -2, -6), Pos::new(6, -1, 6))]);
+        bp.name = "Target".into();
+        let made = dock_from(&mut bp, &catalog, &other, "ATTACHED_0", &Place::New { parent: String::new(), at: Pos::new(2, -1, 2), facing: [0, 1, 0] }).unwrap();
+        assert_eq!(made.child, "ATTACHED_0");
+        assert!(made.notes[0].contains("with 1 docked entity") && made.notes[0].contains("turret axis"), "{:?}", made.notes);
+        docks_hold(&bp);
+        let docks = bp.docks();
+        assert_eq!(docks.len(), 2);
+        assert_eq!(docks["ATTACHED_0"].docker, other.docks()["ATTACHED_0"].docker);
+        assert_eq!(bp.root.entity.get(Pos::new(2, -1, 2)).ty(), TURRET_AXIS);
+        assert!(same_blocks(&bp.entity("ATTACHED_0/ATTACHED_0").unwrap().entity, &other.entity("ATTACHED_0/ATTACHED_0").unwrap().entity));
+        let placed: BTreeMap<String, crate::dock::Placement> = bp.layout(|_, d| d.at_rest()).into_iter().collect();
+        assert_eq!(placed["ATTACHED_0"].cell(Pos::new(0, 0, 0)), Some(Pos::new(2, 1, 2)), "its core two above the axis, as on the design it came from");
+        let again = Blueprint::from_sment(&bp.to_sment().unwrap()).unwrap();
+        assert_eq!(again.docks(), docks);
+        assert_eq!(names_in(&again).len(), 3);
+    }
+
+    #[test]
+    fn a_turret_saved_on_its_own_sits_on_a_new_axis_by_its_rail_docker() {
+        let catalog = catalog();
+        let mut alone = with_turret_and_barrel();
+        // The turret as a blueprint of its own, barrel and all.
+        let mut turret = alone.root.children.remove(0);
+        turret.dir = "Gun Turret".into();
+        let alone = Blueprint { name: "Gun Turret".into(), root: turret, ..alone };
+        let docker = alone.entity("").unwrap().entity.for_each_find(663);
+        let mut bp = ship(&[(Pos::new(-6, -2, -6), Pos::new(6, -1, 6))]);
+        let made = dock_from(&mut bp, &catalog, &alone, "", &Place::New { parent: String::new(), at: Pos::new(0, -1, 3), facing: [0, 1, 0] }).unwrap();
+        assert_eq!(made.child, "ATTACHED_0");
+        assert!(made.notes[0].contains("Gun Turret"), "{:?}", made.notes);
+        docks_hold(&bp);
+        let docks = bp.docks();
+        assert_eq!(docks["ATTACHED_0"].docker.pos, docker);
+        assert!(docks.contains_key("ATTACHED_0/ATTACHED_0"), "the barrel comes with it");
+        let again = Blueprint::from_sment(&bp.to_sment().unwrap()).unwrap();
+        assert_eq!(again.docks(), docks);
+        // A blueprint with nothing to sit on an axis by is refused.
+        let plain = ship(&[(Pos::new(1, 0, 0), Pos::new(2, 0, 0))]);
+        let err = dock_from(&mut bp, &catalog, &plain, "", &Place::New { parent: String::new(), at: Pos::new(-3, -1, -3), facing: [0, 1, 0] }).unwrap_err().to_string();
+        assert!(err.contains("no rail docker"), "{err}");
+    }
+
+    #[test]
+    fn what_can_be_docked_is_listed_and_a_trimmed_copy_still_docks_it() {
+        let catalog = catalog();
+        let other = with_two_turrets();
+        let list = dockable(&other);
+        assert_eq!(list.iter().map(|d| (d.path.as_str(), d.docked, d.rail_ty)).collect::<Vec<_>>(), vec![("ATTACHED_0", 1, TURRET_AXIS), ("ATTACHED_1", 0, TURRET_AXIS)], "the ship has no rail docker of its own; barrels come with their turret");
+        let small = Blueprint::from_sment(&trimmed_to(&other, "ATTACHED_1").to_sment().unwrap()).unwrap();
+        assert_eq!(small.root.entity.block_count(), 0);
+        assert_eq!(small.docks().keys().collect::<Vec<_>>(), vec!["ATTACHED_1"]);
+        let mut a = ship(&[(Pos::new(-6, -2, -6), Pos::new(6, -1, 6))]);
+        let mut b = a.clone();
+        let place = Place::New { parent: String::new(), at: Pos::new(3, -1, 3), facing: [0, 1, 0] };
+        dock_from(&mut a, &catalog, &other, "ATTACHED_1", &place).unwrap();
+        dock_from(&mut b, &catalog, &small, "ATTACHED_1", &place).unwrap();
+        assert_eq!(a.to_files().unwrap(), b.to_files().unwrap(), "the trimmed copy docks the same");
     }
 }
