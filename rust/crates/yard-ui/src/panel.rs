@@ -2,7 +2,7 @@
 //! panel of brush size and mirror planes.
 
 use crate::entity_label;
-use crate::work::{self, BrushShape, Ctx, Grab, PaintMode, Tool, MAX_BRUSH};
+use crate::work::{self, BrushShape, Ctx, Grab, PaintMode, Tool, MAX_BRUSH, MAX_REACH, MIN_REACH};
 use leptos::prelude::*;
 use std::collections::BTreeSet;
 use yard_core::api::ClientBlock;
@@ -155,6 +155,7 @@ pub fn BuildPanel(ctx: Ctx) -> impl IntoView {
                 {tool_button(Tool::Turret, "Make turret", "7")}
                 {tool_button(Tool::Core, "Move core", "8")}
                 {tool_button(Tool::Clone, "Clone", "9")}
+                {tool_button(Tool::Stretch, "Stretch", "0")}
             </div>
             <Show when=move || ctx.simulating.get()>
                 <div class="trying">
@@ -376,6 +377,37 @@ pub fn BuildPanel(ctx: Ctx) -> impl IntoView {
                         }
                     }
                 }}
+            </Show>
+            <Show when=move || ctx.tool.get() == Tool::Stretch>
+                <h2>"Stretch"</h2>
+                <div class="shapes stretch-what">
+                    <button class:current=move || ctx.stretch_armor_only.get()
+                            title="Only armour (hull blocks and glass) and lights move. Systems, logic, doors and every other block stay where they are, and the armour does not take their place."
+                            on:click=move |_| { ctx.stretch_armor_only.set(true); ctx.restart_stretch(); }>"Armor only"</button>
+                    <button class:current=move || !ctx.stretch_armor_only.get()
+                            title="Every block moves but the core (and, with the box below ticked, linked blocks and what docks rest on)."
+                            on:click=move |_| { ctx.stretch_armor_only.set(false); ctx.restart_stretch(); }>"All blocks"</button>
+                </div>
+                <label class="check" title="Blocks linked to another (a computer and its modules, logic wiring, linked lights) and the rails, turret axes and rail docker that docked entities rest on stay where they are. Unticked, they move like any other block: a block that moves keeps its links, and where a linked block is drawn out into several, the new ones are linked the same way. But a rail moved from under a docked entity leaves it docked to nothing.">
+                    <input type="checkbox" prop:checked=move || ctx.stretch_safe.get()
+                           on:change=move |ev| { ctx.stretch_safe.set(event_target_checked(&ev)); ctx.restart_stretch(); }/>
+                    "Keep linked blocks and docks in place"
+                </label>
+                <label>
+                    {move || format!("Reaches {} blocks round the point", ctx.stretch_reach.get())}
+                    <input type="range" min=MIN_REACH.to_string() max=MAX_REACH.to_string() step="1" prop:value=move || ctx.stretch_reach.get().to_string()
+                           on:input=move |ev| { ctx.stretch_reach.set(event_target_value(&ev).parse::<i32>().unwrap_or(6).clamp(MIN_REACH, MAX_REACH)); ctx.restart_stretch(); }/>
+                </label>
+                <p class="empty">
+                    {move || match ctx.stretch.get() {
+                        Some(at) => format!("Holding the block at {}, {}, {}. W A S D E Q move it one block a press, along the view; Escape lets go.", at.x, at.y, at.z),
+                        None => "Click a block to take hold of it.".to_string(),
+                    }}
+                </p>
+                <p class="empty">
+                    "The blocks within reach follow the point, the nearer the further: moved out of the hull they stretch after it and blocks are added; moved into it the hull caves in and blocks are taken away. Moving the point back gives back what was there. Each press is one step for Undo. The mirror planes are not used."
+                </p>
+                <button disabled=move || ctx.stretch.get().is_none() on:click=move |_| ctx.release_stretch()>"Let go"</button>
             </Show>
             <Show when=move || ctx.tool.get() == Tool::Smooth>
                 <h2>"Smooth"</h2>
@@ -826,6 +858,8 @@ pub fn BrushPanel(ctx: Ctx) -> impl IntoView {
             BrushShape::Cylinder => " cylinder",
             BrushShape::Sphere => " sphere",
         };
+        let shape = if ctx.brush_hollow.get() { format!(" hollow{}", if shape.is_empty() { " cube" } else { shape }) } else { shape.to_string() };
+        let shape = if ctx.brush_centred.get() { format!("{shape}, centred") } else { shape };
         match mirrored() {
             0 => format!("Brush {} x {} x {}{shape}", b[0], b[1], b[2]),
             n => format!("Brush {} x {} x {}{shape}, mirror {n}", b[0], b[1], b[2]),
@@ -850,6 +884,19 @@ pub fn BrushPanel(ctx: Ctx) -> impl IntoView {
                         <button class:current=move || ctx.brush_shape.get() == shape
                                 on:click=move |_| { ctx.brush_shape.set(shape); ctx.show_brush(); }>{label}</button>
                     })}
+                </div>
+                <label class="check brush-hollow" title="Placing builds only the shell of the shape, one block thick, and leaves its inside as it is: a box's six faces, a sphere's skin, a cylinder's wall and both ends. Removing, painting and smoothing still take the whole shape.">
+                    <input type="checkbox" prop:checked=move || ctx.brush_hollow.get()
+                           on:change=move |ev| { ctx.brush_hollow.set(event_target_checked(&ev)); ctx.show_brush(); }/>
+                    "Hollow when placing"
+                </label>
+                <div class="shapes brush-shape">
+                    <button class:current=move || !ctx.brush_centred.get()
+                            title="The brush starts at the face you click: placing builds outward from it, removing, painting and smoothing dig inward"
+                            on:click=move |_| { ctx.brush_centred.set(false); ctx.show_brush(); }>"From the face"</button>
+                    <button class:current=move || ctx.brush_centred.get()
+                            title="The brush is centred on the click: on the empty cell you click onto when placing (which fills only the empty cells), on the block you click when removing, painting and smoothing"
+                            on:click=move |_| { ctx.brush_centred.set(true); ctx.show_brush(); }>"Centred"</button>
                 </div>
                 <Show when=move || ctx.brush_shape.get() == BrushShape::Cylinder>
                     <p class="empty">"The cylinder stands along the direction you click into: its depth is the size along that axis."</p>

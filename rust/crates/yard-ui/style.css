@@ -184,6 +184,8 @@ kbd {
 .brush .slider input { flex: 1; min-width: 0; accent-color: var(--accent); }
 .brush .slider .value { width: 20px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 .brush-shape { margin-bottom: 6px; }
+.brush-hollow { margin-bottom: 6px; font-size: 12px; }
+.stretch-what { margin-bottom: 8px; }
 .brush-reset { margin-top: 6px; padding: 3px 8px; font-size: 12px; }
 .plane { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .check { display: flex; align-items: center; gap: 6px; cursor: pointer; }

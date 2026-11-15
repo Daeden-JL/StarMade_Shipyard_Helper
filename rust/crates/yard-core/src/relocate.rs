@@ -246,6 +246,17 @@ pub(crate) fn pinned(bp: &Blueprint, docks: &BTreeMap<String, Dock>, path: &str)
     out
 }
 
+/// The cells of the entity at `path` that hold up its docks: the rail docker
+/// it hangs by and every rail or turret axis a docked entity hangs from.
+/// The dock records name them by position, so a block moved away from one
+/// leaves the dock resting on nothing.
+pub fn dock_cells(bp: &Blueprint, path: &str) -> std::collections::BTreeSet<Pos> {
+    let docks = bp.docks();
+    let own = docks.get(path).map(|d| d.docker.pos);
+    let rails = docks.iter().filter(|(child, _)| parent_of(child).is_some_and(|(parent, _)| parent == path)).map(|(_, d)| d.rail.pos);
+    own.into_iter().chain(rails).collect()
+}
+
 /// Where the cells of an entity go when the blocks in `moving` shift by
 /// `by`: each moving block takes the cell `by` away, and a block that was
 /// there goes back to the cell the block that took its place came from.

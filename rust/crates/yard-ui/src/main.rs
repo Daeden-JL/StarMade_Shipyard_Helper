@@ -203,6 +203,9 @@ fn App() -> impl IntoView {
         ctx.selected.track();
         ctx.brush.track();
         ctx.brush_shape.track();
+        ctx.brush_hollow.track();
+        ctx.brush_centred.track();
+        ctx.stretch_reach.track();
         ctx.brush_shown.track();
         ctx.symmetry.track();
         ctx.block_id.track();
@@ -224,8 +227,19 @@ fn App() -> impl IntoView {
             } else if tool != Tool::Core && ctx.relocating.get_untracked().is_some() {
                 ctx.cancel_relocation();
             }
+            if tool != Tool::Stretch {
+                ctx.release_stretch();
+            }
         }
         tool
+    });
+    // The Stretch tool lets go of its block when another entity or design comes on screen.
+    Effect::new(move |was: Option<(String, Option<String>)>| {
+        let now = (ctx.entity_path.get(), ctx.current.with(|c| c.as_ref().map(|s| s.id.clone())));
+        if was.is_some_and(|was| was != now) {
+            ctx.release_stretch();
+        }
+        now
     });
 
     let _ = window_event_listener(leptos::ev::resize, move |_| ctx.redraw());
@@ -331,6 +345,25 @@ fn App() -> impl IntoView {
                 return;
             }
         }
+        // A block held with the Stretch tool: the movement keys move it.
+        if ctx.tool.get_untracked() == Tool::Stretch && ctx.stretch.get_untracked().is_some() && !(ev.ctrl_key() || ev.meta_key() || ev.alt_key()) {
+            let code = ev.code();
+            let handled = match code.as_str() {
+                "Escape" => {
+                    ctx.release_stretch();
+                    true
+                }
+                "KeyW" | "KeyA" | "KeyS" | "KeyD" | "KeyE" | "KeyQ" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "PageUp" | "PageDown" => {
+                    ctx.nudge_stretch(&code);
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                ev.prevent_default();
+                return;
+            }
+        }
         let command = ev.ctrl_key() || ev.meta_key();
         if command {
             // The browser does not always report keys let go while Ctrl or
@@ -360,6 +393,7 @@ fn App() -> impl IntoView {
             "7" => ctx.tool.set(Tool::Turret),
             "8" => ctx.tool.set(Tool::Core),
             "9" => ctx.tool.set(Tool::Clone),
+            "0" => ctx.tool.set(Tool::Stretch),
             // The game's activate key.
             "r" => ctx.use_under_pointer(),
             // As in the game's build mode: C selects the block looked at, V
@@ -1006,7 +1040,9 @@ fn App() -> impl IntoView {
                                     work::BrushShape::Cylinder => "Cylinder",
                                     work::BrushShape::Sphere => "Sphere",
                                 };
-                                format!("{shape} brush {} × {} × {}", b[0], b[1], b[2])
+                                let hollow = if ctx.brush_hollow.get() { "Hollow " } else { "" };
+                                let centred = if ctx.brush_centred.get() { ", centred" } else { "" };
+                                format!("{hollow}{shape} brush {} × {} × {}{centred}", b[0], b[1], b[2])
                             }}
                         </div>
                     </Show>

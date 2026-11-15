@@ -18,6 +18,7 @@ use yard_core::api::{ClientBlock, GameYard, StepRequest, Summary, SyncInfo, Sync
 use yard_core::catalog::Shape;
 use yard_core::shape::{ShapeSet, SIDE_DIRS};
 use yard_core::edit::{self, Change, FillMode, Op, Symmetry, When};
+use yard_core::stretch::{self, Region};
 use yard_core::dock::Motion;
 use yard_core::rig::{Contact, Rig};
 use yard_core::sim::{Note, Press, Sim};
@@ -161,6 +162,9 @@ pub enum Tool {
     /// Copy the docked entity on screen in place of another, or onto a new
     /// rail at a cell clicked on its parent.
     Clone,
+    /// Click a block to take hold of it, then move it with the movement
+    /// keys: the blocks round it follow, added or taken away as needed.
+    Stretch,
 }
 
 /// One thing a click can do.
@@ -186,6 +190,8 @@ pub enum Act {
     Exclude,
     /// Choose the core's new cell.
     Core,
+    /// Take hold of the block, to stretch the blocks round it.
+    Stretch,
 }
 
 /// What the movement keys move while a turret box is being chosen.
@@ -285,9 +291,18 @@ impl BrushShape {
         }
     }
 
-    /// The cells of the shape in the box, as rows along X: boxes to fill.
-    pub fn rows(self, lo: Pos, hi: Pos, axis: usize) -> Vec<(Pos, Pos)> {
-        if self == BrushShape::Cube {
+    /// Whether cell `p` is in what the brush places: the shape, or with
+    /// `hollow` only its shell, one block thick: the cells of the shape with
+    /// a side on what is not. A hollow cylinder is closed at both ends.
+    pub fn covers(self, lo: Pos, hi: Pos, axis: usize, hollow: bool, p: Pos) -> bool {
+        let within = |q: Pos| (lo.x..=hi.x).contains(&q.x) && (lo.y..=hi.y).contains(&q.y) && (lo.z..=hi.z).contains(&q.z) && self.holds(lo, hi, axis, q);
+        within(p) && (!hollow || yard_core::shape::SIDE_DIRS.iter().any(|d| !within(p.offset(d[0], d[1], d[2]))))
+    }
+
+    /// The cells the brush places in the box (see `covers`), as rows along
+    /// X: boxes to fill.
+    pub fn rows(self, lo: Pos, hi: Pos, axis: usize, hollow: bool) -> Vec<(Pos, Pos)> {
+        if self == BrushShape::Cube && !hollow {
             return vec![(lo, hi)];
         }
         let mut rows = Vec::new();
@@ -295,7 +310,7 @@ impl BrushShape {
             for y in lo.y..=hi.y {
                 let mut start = None;
                 for x in lo.x..=hi.x + 1 {
-                    let inside = x <= hi.x && self.holds(lo, hi, axis, Pos::new(x, y, z));
+                    let inside = x <= hi.x && self.covers(lo, hi, axis, hollow, Pos::new(x, y, z));
                     match (inside, start) {
                         (true, None) => start = Some(x),
                         (false, Some(from)) => {
@@ -462,6 +477,7 @@ impl Tool {
             (Tool::Turret, _) => "Click two blocks to mark the corners of the part to cut out as a turret; right-click blocks in the box (as many as the brush takes) to leave them on the ship, or take them back, Shift+right-click for the whole section of touching blocks",
             (Tool::Smooth, _) => "Click to bevel the edges of steps in the brush with wedges, right-click to turn wedges back into whole blocks",
             (Tool::Use, _) => "Click a button, a switch, a door or a light to use it as in the game (R). Nothing in the design changes",
+            (Tool::Stretch, _) => "Click a block to take hold of it, then move it with W A S D E Q: the blocks round it stretch after it or cave in. Escape lets go",
             (Tool::Clone, _) => "Copy the docked entity on screen: choose on the right what it replaces, or where its new rail goes, then click the cell for the rail (Shift-click the space in front of a block); Enter confirms, Escape cancels",
         }
     }
@@ -481,6 +497,7 @@ impl Tool {
             Tool::Turret => Some(if right { Act::Exclude } else { Act::Turret }),
             Tool::Core => (!right).then_some(Act::Core),
             Tool::Clone => (!right).then_some(Act::Core),
+            Tool::Stretch => (!right).then_some(Act::Stretch),
         }
     }
 }
@@ -556,7 +573,33 @@ pub struct Workspace {
     sizes: std::collections::HashMap<String, Option<Bounds>>,
     /// The blocks of a piece being placed, in its own coordinates, as made.
     piece: Option<yard_core::Entity>,
+    /// The blocks round the point the Stretch tool holds, as they were when
+    /// it began to move; None until it moves, and whenever it must begin again.
+    stretch: Option<Stretching>,
 }
+
+/// A stretch under way (see `yard_core::stretch`).
+struct Stretching {
+    /// The entity stretched.
+    path: String,
+    /// The blocks round the point as they were before it moved.
+    base: Region,
+    /// How far the point has moved since.
+    by: [i32; 3],
+    armor_only: bool,
+    /// Whether linked blocks and what docks rest on were to stay in place.
+    safe: bool,
+    /// The cells whose blocks stay in place for that.
+    fixed: std::collections::HashSet<Pos>,
+    /// The links that had an end among those blocks: (controller, controlled).
+    links: Vec<(Pos, Pos)>,
+    /// What those cells hold now, if nothing else has changed them.
+    now: Vec<Block>,
+}
+
+/// The least and greatest reach of the Stretch tool, in blocks.
+pub const MIN_REACH: i32 = 2;
+pub const MAX_REACH: i32 = 24;
 
 /// A rail being moved with the Move core tool instead of the core.
 #[derive(Clone, Debug, PartialEq)]
@@ -677,6 +720,19 @@ pub struct Ctx {
     pub brush: RwSignal<[i32; 3]>,
     /// The shape the brush covers in its box.
     pub brush_shape: RwSignal<BrushShape>,
+    /// Whether placing builds only the shell of the brush's shape, one block thick.
+    pub brush_hollow: RwSignal<bool>,
+    /// Whether the brush is centred on the block clicked, rather than set
+    /// against the face clicked.
+    pub brush_centred: RwSignal<bool>,
+    /// The block the Stretch tool holds, where it is now.
+    pub stretch: RwSignal<Option<Pos>>,
+    /// How far round that block the stretch reaches, in blocks.
+    pub stretch_reach: RwSignal<i32>,
+    /// Whether a stretch moves armour (hull, glass) and lights only, or every block.
+    pub stretch_armor_only: RwSignal<bool>,
+    /// Whether a stretch leaves linked blocks and the blocks docks rest on where they are.
+    pub stretch_safe: RwSignal<bool>,
     /// How the Paint tool covers blocks.
     pub paint_mode: RwSignal<PaintMode>,
     /// How tall a step the Smooth tool bevels the edge of, in blocks.
@@ -910,6 +966,12 @@ impl Ctx {
             turn: RwSignal::new(0),
             brush: RwSignal::new([1; 3]),
             brush_shape: RwSignal::new(BrushShape::default()),
+            brush_hollow: RwSignal::new(false),
+            brush_centred: RwSignal::new(false),
+            stretch: RwSignal::new(None),
+            stretch_reach: RwSignal::new(6),
+            stretch_armor_only: RwSignal::new(true),
+            stretch_safe: RwSignal::new(true),
             paint_mode: RwSignal::new(PaintMode::default()),
             smooth_step: RwSignal::new(1),
             smooth_inside: RwSignal::new(true),
@@ -2101,18 +2163,20 @@ impl Ctx {
 
     /// The box of cells an action would cover for a hit: the brush, set against
     /// the face that was hit. Placing grows outward from the face; removing and
-    /// painting dig inward from it.
-    fn brush_box(act: Act, hit: &Hit, size: [i32; 3]) -> Option<(Pos, Pos)> {
+    /// painting dig inward from it. With `centred`, the brush is centred on
+    /// its first cell instead (the empty cell clicked onto when placing, the
+    /// block clicked otherwise), half of it each side of the face.
+    fn brush_box(act: Act, hit: &Hit, size: [i32; 3], centred: bool) -> Option<(Pos, Pos)> {
         let outward = act == Act::Place;
         if outward && hit.normal == [0; 3] {
             return None;
         }
         let anchor = if outward { hit.outside() } else { hit.pos }.to_array();
-        let size = if matches!(act, Act::Pick | Act::Select | Act::Connect | Act::Turret | Act::Core) { [1; 3] } else { size };
+        let size = if matches!(act, Act::Pick | Act::Select | Act::Connect | Act::Turret | Act::Core | Act::Stretch) { [1; 3] } else { size };
         let (mut lo, mut hi) = ([0; 3], [0; 3]);
         for a in 0..3 {
             let extra = size[a].clamp(1, MAX_BRUSH) - 1;
-            if hit.normal[a] != 0 {
+            if hit.normal[a] != 0 && !centred {
                 let step = if outward { hit.normal[a] } else { -hit.normal[a] };
                 let far = anchor[a] + step * extra;
                 (lo[a], hi[a]) = (anchor[a].min(far), anchor[a].max(far));
@@ -3936,7 +4000,7 @@ impl Ctx {
         let size = self.brush.get_untracked();
         let Some((hit, a, b)) = self.ws.with_value(|w| {
             let hit = Self::pick(w, x, y)?;
-            let (a, b) = Self::brush_box(Act::Exclude, &hit, size)?;
+            let (a, b) = Self::brush_box(Act::Exclude, &hit, size, false)?;
             Some((hit.pos, a, b))
         }) else {
             return;
@@ -4083,6 +4147,155 @@ impl Ctx {
             }
         }
         self.turret_changed();
+    }
+
+    /// A click with the Stretch tool: takes hold of the block under it. A
+    /// click past the design keeps what is held: it was most likely the
+    /// start of turning the view.
+    fn stretch_click(self, x: i32, y: i32) {
+        let Some(at) = self.ws.with_value(|w| Self::pick(w, x, y).map(|hit| hit.pos)) else { return };
+        self.ws.update_value(|w| w.stretch = None);
+        self.stretch.set(Some(at));
+        self.say("Holding this block: W A S D E Q move it and the blocks round it follow. Escape lets go.");
+        self.refresh_overlay();
+        self.redraw();
+    }
+
+    /// Lets go of the block the Stretch tool holds; what was stretched stays.
+    pub fn release_stretch(self) {
+        if self.stretch.get_untracked().is_some() {
+            self.ws.update_value(|w| w.stretch = None);
+            self.stretch.set(None);
+            self.say("");
+            self.refresh_overlay();
+            self.redraw();
+        }
+    }
+
+    /// The stretch begins again from the blocks as they are now, where the
+    /// point is: after its reach or what it moves is changed in the panel.
+    pub fn restart_stretch(self) {
+        self.ws.update_value(|w| w.stretch = None);
+        self.refresh_overlay();
+        self.redraw();
+    }
+
+    /// A movement key while the Stretch tool holds a block: the block goes
+    /// one cell along the grid axis nearest the way the view looks, and the
+    /// blocks round it are stretched after it, as one step. Each press works
+    /// from the blocks as they were when the point began to move, so moving
+    /// it back gives back what was there. When the point has gone as far as
+    /// the reach allows, or something else has changed the blocks meanwhile,
+    /// it begins again from the blocks as they are.
+    pub fn nudge_stretch(self, code: &str) {
+        let Some(held) = self.stretch.get_untracked() else { return };
+        let (forward, right) = self.ws.with_value(|w| w.renderer.as_ref().map(|r| r.camera.heading())).unwrap_or(([0, 0, -1], [1, 0, 0]));
+        let step = match code {
+            "KeyW" | "ArrowUp" => forward,
+            "KeyS" | "ArrowDown" => forward.map(|v| -v),
+            "KeyD" | "ArrowRight" => right,
+            "KeyA" | "ArrowLeft" => right.map(|v| -v),
+            "KeyE" | "PageUp" => [0, 1, 0],
+            "KeyQ" | "PageDown" => [0, -1, 0],
+            _ => return,
+        };
+        let (reach, armor_only) = (self.stretch_reach.get_untracked().clamp(MIN_REACH, MAX_REACH), self.stretch_armor_only.get_untracked());
+        let safe = self.stretch_safe.get_untracked();
+        let planned = self.ws.try_update_value(|w| {
+            let kept = w.stretch.take();
+            let Workspace { blueprint, looks, path, .. } = w;
+            let bp = blueprint.as_ref()?;
+            let entity = &bp.entity(path)?.entity;
+            let read = |centre: Pos| Region::read(centre, reach, |p| entity.get(p));
+            let further = |s: &Stretching| [0, 1, 2].map(|a| s.by[a] + step[a]);
+            // The links with an end in a region, as (controller, type controlled, controlled).
+            let links_in = |region: &Region| -> BTreeSet<(Pos, u16, Pos)> {
+                let mut out = BTreeSet::new();
+                for (c, groups) in entity.links() {
+                    for (ty, targets) in groups {
+                        out.extend(targets.iter().filter(|t| region.holds(*c) || region.holds(**t)).map(|t| (*c, *ty, *t)));
+                    }
+                }
+                out
+            };
+            // Carry on from the blocks read before if this is still that stretch.
+            let kept = kept.filter(|s| {
+                s.path == *path
+                    && s.base.reach == reach
+                    && s.armor_only == armor_only
+                    && s.safe == safe
+                    && s.base.centre.offset(s.by[0], s.by[1], s.by[2]) == held
+                    && stretch::reaches(reach, further(s))
+                    && read(s.base.centre).blocks == s.now
+            });
+            let mut next = match kept {
+                Some(mut s) => {
+                    s.by = further(&s);
+                    s
+                }
+                None => {
+                    let base = read(held);
+                    let links: Vec<(Pos, Pos)> = links_in(&base).into_iter().map(|(c, _, t)| (c, t)).collect();
+                    // Kept in place for safety: linked blocks, and what docks rest on.
+                    let fixed = if safe {
+                        let docks = yard_core::relocate::dock_cells(bp, path);
+                        links.iter().flat_map(|(c, t)| [*c, *t]).chain(docks).filter(|p| base.holds(*p)).collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    };
+                    Stretching { path: path.clone(), base, by: step, armor_only, safe, fixed, links, now: Vec::new() }
+                }
+            };
+            let after = stretch::moved(&next.base, next.by, |p, b| b.ty() != edit::CORE_TYPE && !next.fixed.contains(&p) && (!armor_only || looks.is_armor_or_light(b.ty())));
+            let cells: Vec<(Pos, Block)> = next.base.cells().zip(after.iter().map(|(b, _)| *b)).filter(|(p, b)| entity.get(*p) != *b).collect();
+            // The links go with the blocks: those there are now and should not
+            // be are taken away, those that should be and are not are made.
+            // A link to a cell whose block becomes another type is made anew,
+            // as the step drops the links of such a cell.
+            let retyped: std::collections::HashSet<Pos> = cells.iter().filter(|(p, b)| entity.get(*p).ty() != b.ty()).map(|(p, _)| *p).collect();
+            let ty_after = |p: Pos| next.base.index(p).map_or_else(|| entity.get(p).ty(), |i| after[i].0.ty());
+            let wanted: BTreeSet<(Pos, u16, Pos)> = stretch::carried_links(&next.base, &after, &next.links).into_iter().map(|(c, t)| (c, ty_after(t), t)).filter(|(_, ty, _)| *ty != 0).collect();
+            let there = links_in(&next.base);
+            let stays = |l: &(Pos, u16, Pos)| there.contains(l) && wanted.contains(l) && !retyped.contains(&l.0) && !retyped.contains(&l.2);
+            let grouped = |links: &BTreeSet<(Pos, u16, Pos)>| {
+                let mut by_controller: std::collections::BTreeMap<Pos, Vec<Pos>> = Default::default();
+                for l in links.iter().filter(|l| !stays(l)) {
+                    by_controller.entry(l.0).or_default().push(l.2);
+                }
+                by_controller
+            };
+            let mut ops = Vec::new();
+            if !cells.is_empty() {
+                ops.push(Op::Set { cells, when: When::Always });
+            }
+            ops.extend(grouped(&there).into_iter().map(|(controller, targets)| Op::Unlink { controller, targets }));
+            ops.extend(grouped(&wanted).into_iter().map(|(controller, targets)| Op::Link { controller, targets }));
+            next.now = after.into_iter().map(|(b, _)| b).collect();
+            let held_back = !next.fixed.is_empty();
+            Some((next, ops, held_back))
+        });
+        let Some((next, ops, held_back)) = planned.flatten() else { return };
+        let (moved, nothing) = (next.base.centre.offset(next.by[0], next.by[1], next.by[2]), ops.is_empty());
+        // Refused (an old version on screen, an undo under way): the point stays where it is.
+        if !nothing {
+            let refused = self.ws.with_value(|w| w.preview || w.stashed.is_some() || w.awaiting_history);
+            // Says why, if it is refused.
+            let _ = self.submit(ops);
+            if refused {
+                return;
+            }
+        }
+        self.ws.update_value(|w| w.stretch = Some(next));
+        self.stretch.set(Some(moved));
+        if nothing {
+            self.say(match (armor_only, held_back) {
+                (true, _) => "Nothing round the point to stretch: only armour and lights move. Choose All blocks to move the rest too.",
+                (false, true) => "Nothing round the point to stretch: linked blocks and docks are kept in place. Untick the box to move them too.",
+                (false, false) => "Nothing round the point to stretch.",
+            });
+        }
+        self.refresh_overlay();
+        self.redraw();
     }
 
     pub fn clear_turret(self) {
@@ -4503,8 +4716,8 @@ impl Ctx {
 
     /// The boxes a placing click would fill, with the block for each: the brush
     /// and its mirror images, each image's block turned to match.
-    fn placements(w: &Workspace, hit: &Hit, ty: u16, turn: u8, symmetry: Symmetry, size: [i32; 3]) -> Vec<(Pos, Pos, Block)> {
-        let Some((lo, hi)) = Self::brush_box(Act::Place, hit, size) else { return Vec::new() };
+    fn placements(w: &Workspace, hit: &Hit, ty: u16, turn: u8, symmetry: Symmetry, size: [i32; 3], centred: bool) -> Vec<(Pos, Pos, Block)> {
+        let Some((lo, hi)) = Self::brush_box(Act::Place, hit, size, centred) else { return Vec::new() };
         let kind = w.looks.kind(ty);
         let orientation = match (kind.shape, kind.faces_matter) {
             (Shape::Cube, false) => 0,
@@ -4526,6 +4739,8 @@ impl Ctx {
     pub fn refresh_overlay(self) {
         let (hovering, mut size, symmetry) = (self.on_click(false), self.brush.get_untracked(), self.symmetry.get_untracked());
         let (brush_shape, brush_shown) = (self.brush_shape.get_untracked(), self.brush_shown.get_untracked());
+        let (hollow, centred) = (self.brush_hollow.get_untracked(), self.brush_centred.get_untracked());
+        let (stretching, stretch_reach) = (self.stretch.get_untracked(), self.stretch_reach.get_untracked());
         let paint_mode = self.paint_mode.get_untracked();
         let (selected, turn) = (self.block_id.get_untracked(), self.turn.get_untracked());
         let (linking, link_from) = (self.tool.get_untracked() == Tool::Link, self.selected.get_untracked());
@@ -4617,13 +4832,14 @@ impl Ctx {
                     (Act::Connect, Some(Ok((_, LinkStep::Unlink)))) => [255, 110, 110],
                     (Act::Connect, _) => [150, 150, 150],
                     (Act::Pick | Act::Select, _) => [255, 255, 255],
+                    (Act::Stretch, _) => [120, 255, 230],
                     (Act::Use, _) => [110, 200, 255],
                 };
                 let tint = |i: usize| [colour[0], colour[1], colour[2], if i == 0 { 255 } else { 130 }];
                 let (shape, axis) = (if shaped(tool) { brush_shape } else { BrushShape::Cube }, brush_axis(hit));
                 if tool == Act::Place {
                     let kind = w.looks.kind(selected);
-                    for (i, (a, b, block)) in Self::placements(w, hit, selected, turn, symmetry, size).into_iter().enumerate() {
+                    for (i, (a, b, block)) in Self::placements(w, hit, selected, turn, symmetry, size, centred).into_iter().enumerate() {
                         outline_brush(&mut overlay, a, b, shape, axis, tint(i));
                         // Show the actual shape, cell by cell, unless the brush is large.
                         let cells = (b.x - a.x + 1) as i64 * (b.y - a.y + 1) as i64 * (b.z - a.z + 1) as i64;
@@ -4635,7 +4851,7 @@ impl Ctx {
                         for z in a.z..=b.z {
                             for y in a.y..=b.y {
                                 for x in a.x..=b.x {
-                                    if !shape.holds(a, b, axis, Pos::new(x, y, z)) {
+                                    if !shape.covers(a, b, axis, hollow, Pos::new(x, y, z)) {
                                         continue;
                                     }
                                     let origin = [x as f32 - 0.5, y as f32 - 0.5, z as f32 - 0.5];
@@ -4668,7 +4884,7 @@ impl Ctx {
                             }
                         }
                     }
-                } else if let Some((lo, hi)) = Self::brush_box(tool, hit, size) {
+                } else if let Some((lo, hi)) = Self::brush_box(tool, hit, size, centred && shaped(tool)) {
                     for (i, (a, b, _)) in symmetry.boxes(lo, hi).into_iter().enumerate() {
                         outline_brush(&mut overlay, a, b, shape, axis, tint(i));
                     }
@@ -4678,6 +4894,19 @@ impl Ctx {
             if let (Some(at), true) = (picked, linking_tool == Tool::Pick) {
                 overlay.wire_box(corner(at, -0.56), corner(at, 0.56), [255, 230, 120, 255]);
                 overlay.wire_box(corner(at, -0.6), corner(at, 0.6), [255, 230, 120, 255]);
+            }
+            // The block the Stretch tool holds, and how far round it the stretch reaches.
+            if let (Some(at), true) = (stretching, linking_tool == Tool::Stretch) {
+                const HELD: [u8; 4] = [120, 255, 230, 255];
+                overlay.wire_box(corner(at, -0.56), corner(at, 0.56), HELD);
+                overlay.wire_box(corner(at, -0.6), corner(at, 0.6), HELD);
+                // The reach is round where the point was when it began to move.
+                let from = w.stretch.as_ref().filter(|s| s.path == w.path && s.base.reach == stretch_reach).map_or(at, |s| s.base.centre);
+                let r = stretch_reach;
+                outline_brush(&mut overlay, from.offset(-r, -r, -r), from.offset(r, r, r), BrushShape::Sphere, 0, [120, 255, 230, 110]);
+                if from != at {
+                    overlay.line(corner(from, 0.0), corner(at, 0.0), HELD);
+                }
             }
             if let Some(b) = w.bounds {
                 let (lo, hi) = (corner(b.min, -2.5), corner(b.max, 2.5));
@@ -4728,7 +4957,7 @@ impl Ctx {
         }
         if self.entity_path.get_untracked() == WHOLE {
             match tool {
-                Act::Place | Act::Remove | Act::Paint | Act::Connect | Act::Smooth | Act::Unsmooth | Act::Turret | Act::Exclude | Act::Core => self.say("The whole design is for looking at and trying out. Choose an entity on the left to edit it."),
+                Act::Place | Act::Remove | Act::Paint | Act::Connect | Act::Smooth | Act::Unsmooth | Act::Turret | Act::Exclude | Act::Core | Act::Stretch => self.say("The whole design is for looking at and trying out. Choose an entity on the left to edit it."),
                 // Nothing else to do with a click here: it uses the block.
                 _ => self.use_at(x, y),
             }
@@ -4739,6 +4968,9 @@ impl Ctx {
         }
         if tool == Act::Exclude {
             return self.turret_exclude(x, y, group);
+        }
+        if tool == Act::Stretch {
+            return self.stretch_click(x, y);
         }
         if tool == Act::Core && self.tool.get_untracked() == Tool::Clone {
             return self.say("Choose on the right what the copy replaces, or where its new rail goes.");
@@ -4765,6 +4997,7 @@ impl Ctx {
         }
         let (mut size, symmetry, selected) = (self.brush.get_untracked(), self.symmetry.get_untracked(), self.block_id.get_untracked());
         let shape = if shaped(tool) { self.brush_shape.get_untracked() } else { BrushShape::Cube };
+        let centred = self.brush_centred.get_untracked();
         let paint_mode = self.paint_mode.get_untracked();
         let (smooth_step, smooth_inside, smooth_sharpen) = (self.smooth_step.get_untracked(), self.smooth_inside.get_untracked(), self.smooth_sharpen.get_untracked());
         if tool == Act::Paint && paint_mode != PaintMode::Brush {
@@ -4782,11 +5015,13 @@ impl Ctx {
             }
             if tool == Act::Place {
                 let link = Self::link_for_placed(w, selected, link_from);
-                let axis = brush_axis(&hit);
-                let ops = Self::placements(w, &hit, selected, turn, symmetry, size)
+                let (axis, hollow) = (brush_axis(&hit), self.brush_hollow.get_untracked());
+                // A hollow box is one fill; the round shapes go in as rows.
+                let (rows_hollow, mode) = if hollow && shape == BrushShape::Cube { (false, FillMode::Hollow) } else { (hollow, FillMode::Solid) };
+                let ops = Self::placements(w, &hit, selected, turn, symmetry, size, centred)
                     .into_iter()
-                    .flat_map(|(lo, hi, block)| shape.rows(lo, hi, axis).into_iter().map(move |(min, max)| (min, max, block)))
-                    .map(|(min, max, block)| Op::Fill { min, max, block, mode: FillMode::Solid, when: When::Empty, link })
+                    .flat_map(|(lo, hi, block)| shape.rows(lo, hi, axis, rows_hollow).into_iter().map(move |(min, max)| (min, max, block)))
+                    .map(|(min, max, block)| Op::Fill { min, max, block, mode, when: When::Empty, link })
                     .collect();
                 return Some(Ok(ops));
             }
@@ -4812,7 +5047,7 @@ impl Ctx {
                 return Some(Ok(if cells.is_empty() { Vec::new() } else { vec![Op::Set { cells, when: When::Occupied }] }));
             }
             if matches!(tool, Act::Smooth | Act::Unsmooth) {
-                let (lo, hi) = Self::brush_box(tool, &hit, size)?;
+                let (lo, hi) = Self::brush_box(tool, &hit, size, centred)?;
                 let axis = brush_axis(&hit);
                 let mut cells = Vec::new();
                 let mut done = std::collections::HashSet::new();
@@ -4897,14 +5132,14 @@ impl Ctx {
                 }
                 return Some(Ok(ops));
             }
-            let (lo, hi) = Self::brush_box(tool, &hit, size)?;
+            let (lo, hi) = Self::brush_box(tool, &hit, size, centred && shaped(tool))?;
             let (through, armor_only) = (self.paint_through.get_untracked(), self.paint_armor_only.get_untracked());
             let axis = brush_axis(&hit);
             let mut ops = Vec::new();
             for (a, b, _) in symmetry.boxes(lo, hi) {
                 match tool {
                     Act::Remove => {
-                        for (min, max) in shape.rows(a, b, axis) {
+                        for (min, max) in shape.rows(a, b, axis, false) {
                             ops.push(Op::Fill { min, max, block: Block::AIR, mode: FillMode::Solid, when: When::Always, link: None })
                         }
                     }
@@ -4929,7 +5164,7 @@ impl Ctx {
                             ops.push(Op::Set { cells, when: When::Occupied });
                         }
                     }
-                    Act::Place | Act::Pick | Act::Select | Act::Connect | Act::Use | Act::Smooth | Act::Unsmooth | Act::Turret | Act::Exclude | Act::Core => {}
+                    Act::Place | Act::Pick | Act::Select | Act::Connect | Act::Use | Act::Smooth | Act::Unsmooth | Act::Turret | Act::Exclude | Act::Core | Act::Stretch => {}
                 }
             }
             Some(Ok(ops))
@@ -5272,27 +5507,31 @@ mod tests {
     #[test]
     fn placing_grows_outward_from_the_clicked_face() {
         // Clicking the top of a block: one block goes in the cell above.
-        let single = Ctx::brush_box(Act::Place, &hit((0, 0, 0), [0, 1, 0]), [1, 1, 1]).unwrap();
+        let single = Ctx::brush_box(Act::Place, &hit((0, 0, 0), [0, 1, 0]), [1, 1, 1], false).unwrap();
         assert_eq!(single, (Pos::new(0, 1, 0), Pos::new(0, 1, 0)));
         // A 3 x 2 x 5 brush on the same face: centred sideways, two layers upward.
-        let big = Ctx::brush_box(Act::Place, &hit((0, 0, 0), [0, 1, 0]), [3, 2, 5]).unwrap();
+        let big = Ctx::brush_box(Act::Place, &hit((0, 0, 0), [0, 1, 0]), [3, 2, 5], false).unwrap();
         assert_eq!(big, (Pos::new(-1, 1, -2), Pos::new(1, 2, 2)));
         // On a face pointing toward -X the brush extends further toward -X.
-        let side = Ctx::brush_box(Act::Place, &hit((4, 0, 0), [-1, 0, 0]), [3, 1, 1]).unwrap();
+        let side = Ctx::brush_box(Act::Place, &hit((4, 0, 0), [-1, 0, 0]), [3, 1, 1], false).unwrap();
         assert_eq!(side, (Pos::new(1, 0, 0), Pos::new(3, 0, 0)));
         // With the camera inside a block there is no face to build on.
-        assert_eq!(Ctx::brush_box(Act::Place, &hit((0, 0, 0), [0, 0, 0]), [1, 1, 1]), None);
+        assert_eq!(Ctx::brush_box(Act::Place, &hit((0, 0, 0), [0, 0, 0]), [1, 1, 1], false), None);
     }
 
     #[test]
     fn removing_and_painting_dig_inward_from_the_clicked_face() {
         let h = hit((0, 5, 0), [0, 1, 0]);
-        assert_eq!(Ctx::brush_box(Act::Remove, &h, [1, 3, 1]).unwrap(), (Pos::new(0, 3, 0), Pos::new(0, 5, 0)));
-        assert_eq!(Ctx::brush_box(Act::Paint, &h, [2, 1, 2]).unwrap(), (Pos::new(0, 5, 0), Pos::new(1, 5, 1)));
+        assert_eq!(Ctx::brush_box(Act::Remove, &h, [1, 3, 1], false).unwrap(), (Pos::new(0, 3, 0), Pos::new(0, 5, 0)));
+        assert_eq!(Ctx::brush_box(Act::Paint, &h, [2, 1, 2], false).unwrap(), (Pos::new(0, 5, 0), Pos::new(1, 5, 1)));
         // Picking always takes exactly the block under the pointer.
-        assert_eq!(Ctx::brush_box(Act::Pick, &h, [9, 9, 9]).unwrap(), (Pos::new(0, 5, 0), Pos::new(0, 5, 0)));
+        assert_eq!(Ctx::brush_box(Act::Pick, &h, [9, 9, 9], false).unwrap(), (Pos::new(0, 5, 0), Pos::new(0, 5, 0)));
         // Oversized brushes are capped.
-        let (lo, hi) = Ctx::brush_box(Act::Remove, &h, [1, 1000, 1]).unwrap();
+        // Centred, the brush has half of itself each side of the face, whichever way it would have gone.
+        assert_eq!(Ctx::brush_box(Act::Remove, &h, [1, 3, 1], true).unwrap(), (Pos::new(0, 4, 0), Pos::new(0, 6, 0)));
+        assert_eq!(Ctx::brush_box(Act::Place, &h, [5, 5, 5], true).unwrap(), (Pos::new(-2, 4, -2), Pos::new(2, 8, 2)));
+        assert_eq!(Ctx::brush_box(Act::Place, &h, [1, 1, 1], true).unwrap(), (Pos::new(0, 6, 0), Pos::new(0, 6, 0)));
+        let (lo, hi) = Ctx::brush_box(Act::Remove, &h, [1, 1000, 1], false).unwrap();
         assert_eq!(hi.y - lo.y + 1, MAX_BRUSH);
     }
     #[test]
@@ -5342,12 +5581,54 @@ mod tests {
         }
         // A cube is filled as one box; the round shapes as rows along X that
         // cover their cells and nothing else.
-        assert_eq!(BrushShape::Cube.rows(lo, hi, 2), vec![(lo, hi)]);
+        assert_eq!(BrushShape::Cube.rows(lo, hi, 2, false), vec![(lo, hi)]);
         for shape in [BrushShape::Cylinder, BrushShape::Sphere] {
-            let rows = shape.rows(lo, hi, 2);
+            let rows = shape.rows(lo, hi, 2, false);
             let cells: usize = rows.iter().map(|(a, b)| (b.x - a.x + 1) as usize).sum();
             assert_eq!(cells, count(shape, 2));
             assert!(rows.iter().all(|(a, b)| a.y == b.y && a.z == b.z && (a.x..=b.x).all(|x| shape.holds(lo, hi, 2, Pos::new(x, a.y, a.z)))));
+        }
+    }
+
+    #[test]
+    fn hollow_brush_shapes_keep_only_their_shell() {
+        let (lo, hi) = (Pos::new(0, 0, 0), Pos::new(6, 6, 6));
+        let cells = |shape: BrushShape, axis: usize, hollow: bool| {
+            let mut all = std::collections::HashSet::new();
+            for z in -1..=7 {
+                for y in -1..=7 {
+                    for x in -1..=7 {
+                        let p = Pos::new(x, y, z);
+                        if shape.covers(lo, hi, axis, hollow, p) {
+                            all.insert(p);
+                        }
+                    }
+                }
+            }
+            all
+        };
+        // A box keeps its six faces; a cylinder its wall and both ends.
+        assert_eq!(cells(BrushShape::Cube, 1, false).len(), 343);
+        assert_eq!(cells(BrushShape::Cube, 1, true).len(), 343 - 125);
+        let disc = cells(BrushShape::Cylinder, 1, false).len() / 7;
+        let ring = cells(BrushShape::Cylinder, 1, true).iter().filter(|p| p.y == 3).count();
+        assert_eq!(cells(BrushShape::Cylinder, 1, true).len(), 2 * disc + 5 * ring);
+        for (shape, _) in BrushShape::ALL {
+            let (solid, shell) = (cells(shape, 1, false), cells(shape, 1, true));
+            assert!(shell.is_subset(&solid) && shell.len() < solid.len());
+            assert!(!shell.contains(&Pos::new(3, 3, 3)), "the middle is left empty");
+            // Sealed: no cell left empty touches the outside at a face.
+            for p in solid.difference(&shell) {
+                assert!(yard_core::shape::SIDE_DIRS.iter().all(|d| solid.contains(&p.offset(d[0], d[1], d[2]))));
+            }
+            // The rows cover the shell and nothing else.
+            let rows = shape.rows(lo, hi, 1, true);
+            let covered: std::collections::HashSet<Pos> = rows.iter().flat_map(|(a, b)| (a.x..=b.x).map(|x| Pos::new(x, a.y, a.z))).collect();
+            assert_eq!(covered, shell);
+            assert_eq!(rows.iter().map(|(a, b)| (b.x - a.x + 1) as usize).sum::<usize>(), shell.len());
+            // Too thin to have an inside: all of it is shell.
+            let thin = Pos::new(6, 1, 6);
+            assert!((0..7).all(|x| (0..7).all(|z| shape.covers(lo, thin, 1, true, Pos::new(x, 0, z)) == shape.holds(lo, thin, 1, Pos::new(x, 0, z)))));
         }
     }
 

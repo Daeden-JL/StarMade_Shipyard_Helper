@@ -30,6 +30,7 @@ pub mod rig;
 pub mod shape;
 pub mod sim;
 pub mod smooth;
+pub mod stretch;
 mod shape_data;
 pub mod smd3;
 pub mod tag;
